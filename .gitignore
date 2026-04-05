@@ -1,0 +1,20 @@
+# Secrets — never commit these
+.env
+token.json
+credentials.json
+launch_agent.bat
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+
+# Personal data files
+documents/
+logs/
+*.log
+
+# Windows artifacts
+Thumbs.db
+desktop.ini
