@@ -14,8 +14,6 @@ from datetime import date
 from tavily import TavilyClient
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
-from dotenv import load_dotenv
-load_dotenv()
 
 # ── Agent imports ──────────────────────────────────────────────────────────
 from agents import calendar_agent, tasks_agent, habits_agent
@@ -212,8 +210,70 @@ tools = [
     # ── Chores ────────────────────────────────────────────────────────────
     {
         "name": "get_todays_chores",
-        "description": "Get today's chores based on day of week and any maintenance items due.",
+        "description": "Get today's chores with completion status (✅ done / ⏳ pending) based on logged history.",
         "input_schema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "chore_complete",
+        "description": "Log a chore as completed today. Use when Mason says 'I vacuumed', 'did laundry', 'mopped', 'changed the AC filter', or any chore completion. Also logs to Google Calendar automatically.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "chore_name_input": {"type": "string", "description": "The chore that was completed — fuzzy matched against the chore list"},
+                "note": {"type": "string", "description": "Optional note e.g. 'both bathrooms', 'replaced with HEPA filter'"}
+            },
+            "required": ["chore_name_input"]
+        }
+    },
+    {
+        "name": "chore_history_view",
+        "description": "View chore completion history. Can filter by chore name. Use when Mason asks 'what chores have I done' or 'show my chore log'.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "chore": {"type": "string", "description": "Optional chore name to filter by"},
+                "limit": {"type": "integer", "description": "Number of entries to show. Default 20."}
+            }
+        }
+    },
+    {
+        "name": "chore_last_done",
+        "description": "Check when a specific chore was last completed. Use when Mason asks 'when did I last vacuum' or 'when did I last change the AC filter'.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "chore": {"type": "string", "description": "The chore to look up"}
+            },
+            "required": ["chore"]
+        }
+    },
+    {
+        "name": "chore_status_all",
+        "description": "Show full status of ALL chores across all frequencies with done/pending indicators and days since last completion. Use for 'show all my chores' or 'what's my chore status'.",
+        "input_schema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "chore_add",
+        "description": "Add a new chore to the chore list with a frequency.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "chore_name_input": {"type": "string", "description": "The chore description"},
+                "frequency": {"type": "string", "description": "DAILY, WEEKLY-MON, WEEKLY-TUE, WEEKLY-WED, WEEKLY-THU, WEEKLY-FRI, WEEKLY-SAT, WEEKLY-SUN, MONTHLY, QUARTERLY, or ANNUALLY"}
+            },
+            "required": ["chore_name_input", "frequency"]
+        }
+    },
+    {
+        "name": "chore_remove",
+        "description": "Remove a chore from the chore list permanently.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "chore_name_input": {"type": "string", "description": "The chore to remove — fuzzy matched"}
+            },
+            "required": ["chore_name_input"]
+        }
     },
     {
         "name": "reschedule_chore",
@@ -229,7 +289,7 @@ tools = [
     },
     {
         "name": "get_maintenance_due",
-        "description": "Check what home maintenance tasks are due this month, quarter, or year.",
+        "description": "Check what home maintenance tasks are due this month, quarter, or year — with completion status.",
         "input_schema": {
             "type": "object",
             "properties": {"period": {"type": "string", "description": "monthly, quarterly, or annually"}},
@@ -919,6 +979,12 @@ def build_registry():
         "list_show_all":       lambda i: la.list_show_all(),
         # Chores
         "get_todays_chores":   lambda i: ch.get_todays_chores(),
+        "chore_complete":      lambda i: ch.chore_complete(i["chore_name_input"], i.get("note")),
+        "chore_history_view":  lambda i: ch.chore_history_view(i.get("chore"), i.get("limit", 20)),
+        "chore_last_done":     lambda i: ch.chore_last_done(i["chore"]),
+        "chore_status_all":    lambda i: ch.chore_status_all(),
+        "chore_add":           lambda i: ch.chore_add(i["chore_name_input"], i["frequency"]),
+        "chore_remove":        lambda i: ch.chore_remove(i["chore_name_input"]),
         "reschedule_chore":    lambda i: ch.reschedule_chore(i["chore"], i["new_frequency"]),
         "get_maintenance_due": lambda i: ch.get_maintenance_due(i["period"]),
         # Calendar
@@ -1002,6 +1068,15 @@ SYSTEM_PROMPT = (
     "HABIT RULES: Mason tracks 3 habits: workout, water, stretching. "
     "When Mason says 'I worked out', 'did my stretching', 'drank water today' use habit_log with completed=true. "
     "When he says 'skipped my workout' use habit_log with completed=false. For streaks use habit_streak. "
+
+    "CHORES RULES: Mason has a chore schedule with frequency tags (daily, weekly, monthly, quarterly, annually). "
+    "(1) When Mason says he completed a chore — 'I vacuumed', 'did laundry', 'mopped', 'changed the AC filter', 'cleaned bathrooms' — use chore_complete. "
+    "(2) Use get_todays_chores to show today's chores with ✅/⏳ status. "
+    "(3) Use chore_status_all for a full overview of all chores. "
+    "(4) Use chore_last_done when Mason asks 'when did I last X'. "
+    "(5) Use chore_history_view to show the completion log. "
+    "(6) Use chore_add to add new chores, chore_remove to remove them. "
+    "(7) Completed chores are automatically logged to Google Calendar as Graphite all-day events. "
 
     "TASKS RULES: Mason uses Google Tasks for structured to-do management. "
     "(1) When Mason says 'add a task' or 'remind me to' use tasks_add. "
@@ -1159,7 +1234,7 @@ def main():
         return
 
     print("=== Mason's Personal Agent ===")
-    print("Your assistant is running. Telegram your bot to get started!")
+    print("Telegram bot is running. Message your bot to get started!")
 
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
