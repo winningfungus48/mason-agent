@@ -568,7 +568,7 @@ tools = [
     # ── Google Tasks ──────────────────────────────────────────────────────
     {
         "name": "tasks_add",
-        "description": "Add a new task to a Google Task list. Use this when Mason says 'add a task', 'remind me to', 'I need to', or 'put X on my list'. Use get_day_of_week_date first if Mason mentions a day name for the due date.",
+        "description": "Add a new task to a Google Task list. Use this when Mason says 'add a task', 'create a task', 'remind me to', 'I need to', 'put X on my list', or 'add X to my list'. Use get_day_of_week_date first if Mason mentions a day name for the due date.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -648,7 +648,7 @@ tools = [
     },
     {
         "name": "tasks_list_all",
-        "description": "Show a summary of all Google Task LIST NAMES with counts and overdue flags. Use ONLY when Mason asks what lists exist — NOT when Mason wants to see tasks inside a list (use tasks_view for that).",
+        "description": "Show a summary of all Google Task LIST NAMES with counts and overdue flags. Use ONLY when Mason asks what lists exist — e.g. 'what task lists do I have', 'show all my lists'. Do NOT use for 'create a task', 'add a task', or any request to see tasks inside a list.",
         "input_schema": {"type": "object", "properties": {}}
     },
     {
