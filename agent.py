@@ -14,6 +14,8 @@ from datetime import date
 from tavily import TavilyClient
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
+from dotenv import load_dotenv
+load_dotenv()
 
 # ── Agent imports ──────────────────────────────────────────────────────────
 from agents import calendar_agent, tasks_agent, habits_agent
