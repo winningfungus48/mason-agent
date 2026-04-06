@@ -1255,7 +1255,17 @@ conversation_histories = {}
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id      = str(update.effective_chat.id)
     user_message = update.message.text
-
+# Deploy command
+    if user_message.strip().lower() == "/deploy":
+        await update.message.reply_text("🔄 Deploying latest code...")
+        import subprocess
+        result = subprocess.run(
+            ["/home/mason/agent/deploy.sh"],
+            capture_output=True, text=True, timeout=120
+        )
+        output = result.stdout[-1500:] if result.stdout else "No output."
+        await update.message.reply_text(f"✅ Deploy complete:\n\n{output}")
+        return
     if chat_id != TELEGRAM_CHAT_ID:
         await update.message.reply_text("Unauthorized.")
         return
