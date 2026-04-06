@@ -759,6 +759,274 @@ def tasks_calendar_crosscheck():
         return f"Error running crosscheck: {str(e)}"
 
 
+# ─────────────────────────────────────────────
+# PHASE 13C — ORGANIZATION & ENHANCEMENTS
+# ─────────────────────────────────────────────
+
+# Life-area list definitions
+LIFE_AREA_LISTS = {
+    "🏠 Home":              "Home maintenance, repairs, household purchases, improvements",
+    "🚗 Errands & Auto":    "Oil change, DMV, returns, appointments to book, car-related tasks",
+    "💰 Finance":           "Budget, bills, insurance, investments, financial to-dos",
+    "🛒 Grocery & Essentials": "One-off grocery items and household essentials that come to mind mid-week",
+    "🛍️ Buy List":          "Personal purchases, gear, clothing, things to order online",
+    "💪 Health & Fitness":  "Doctor appointments, fitness goals, supplements, health-related tasks",
+    "🤖 AI & Learning":     "AI projects, things to try, research, learning goals",
+}
+
+# Keyword → list name mapping for smart categorization
+LIST_CATEGORY_KEYWORDS = {
+    "🏠 Home": [
+        "fix", "repair", "replace", "install", "clean", "paint", "garage",
+        "lawn", "yard", "fence", "roof", "gutter", "plumber", "electrician",
+        "furniture", "appliance", "hvac", "filter", "vacuum", "mop",
+    ],
+    "🚗 Errands & Auto": [
+        "oil change", "car", "tire", "registration", "dmv", "license",
+        "errand", "pick up", "drop off", "return", "post office", "bank",
+        "dry clean", "pharmacy", "prescription", "appointment",
+    ],
+    "💰 Finance": [
+        "budget", "bill", "pay", "insurance", "invest", "tax", "401k",
+        "savings", "credit card", "loan", "rent", "mortgage", "expense",
+        "financial", "bank", "transfer", "subscription",
+    ],
+    "🛒 Grocery & Essentials": [
+        "buy", "grocery", "milk", "eggs", "bread", "food", "drink",
+        "paper towel", "toilet paper", "soap", "detergent", "household",
+        "stock up", "restock",
+    ],
+    "🛍️ Buy List": [
+        "order", "purchase", "amazon", "shoes", "clothes", "shirt",
+        "pants", "headphones", "phone", "laptop", "gadget", "gear",
+        "equipment", "gift", "present",
+    ],
+    "💪 Health & Fitness": [
+        "doctor", "dentist", "gym", "workout", "run", "exercise",
+        "vitamin", "supplement", "therapy", "physical", "checkup",
+        "health", "medical", "weight", "diet", "sleep",
+    ],
+    "🤖 AI & Learning": [
+        "learn", "study", "read", "research", "ai", "claude", "gpt",
+        "course", "tutorial", "practice", "code", "build", "project",
+        "experiment", "explore",
+    ],
+}
+
+
+def guess_task_list(title):
+    """
+    Suggest a life-area list based on task title keywords.
+    Returns list name string or None if no match.
+    """
+    title_lower = title.lower()
+    for list_name, keywords in LIST_CATEGORY_KEYWORDS.items():
+        for kw in keywords:
+            if kw in title_lower:
+                return list_name
+    return None
+
+
+def tasks_setup_lists():
+    """
+    Create all 7 life-area task lists in Google Tasks.
+    Skips lists that already exist. Safe to run multiple times.
+    """
+    try:
+        print("  [TOOL] Setting up life-area task lists")
+        service = get_tasks_service()
+        existing = get_all_task_lists(service)
+        existing_names = [title for _, title in existing]
+
+        created = []
+        skipped = []
+
+        for list_name in LIFE_AREA_LISTS:
+            if list_name in existing_names:
+                skipped.append(list_name)
+            else:
+                service.tasklists().insert(body={'title': list_name}).execute()
+                created.append(list_name)
+
+        result = "✅ TASK LISTS SETUP COMPLETE:\n\n"
+        if created:
+            result += "Created:\n" + "\n".join(f"• {n}" for n in created) + "\n\n"
+        if skipped:
+            result += "Already existed (skipped):\n" + "\n".join(f"• {n}" for n in skipped)
+
+        return result.strip()
+    except Exception as e:
+        return f"Error setting up lists: {str(e)}"
+
+
+def tasks_move(title_search, target_list, source_list=None):
+    """
+    Move a task from one list to another.
+    Finds the task, creates it in the target list, deletes from source.
+    """
+    try:
+        print(f"  [TOOL] Moving task '{title_search}' to '{target_list}'")
+        service = get_tasks_service()
+
+        # Find target list
+        target_id, target_display = find_list_by_name(service, target_list)
+        if not target_id:
+            return f"Could not find target list '{target_list}'."
+
+        # Search source lists
+        if source_list:
+            source_id, source_display = find_list_by_name(service, source_list)
+            lists_to_check = [(source_id, source_display)] if source_id else []
+        else:
+            lists_to_check = get_all_task_lists(service)
+
+        for list_id, list_display in lists_to_check:
+            if list_id == target_id:
+                continue
+            result = service.tasks().list(
+                tasklist=list_id, maxResults=100, showCompleted=False
+            ).execute()
+            for task in result.get('items', []):
+                if title_search.lower() in task.get('title', '').lower():
+                    # Create in target list
+                    new_body = {
+                        'title': task.get('title', ''),
+                        'notes': task.get('notes', ''),
+                    }
+                    if task.get('due'):
+                        new_body['due'] = task['due']
+
+                    service.tasks().insert(
+                        tasklist=target_id, body=new_body
+                    ).execute()
+
+                    # Delete from source
+                    service.tasks().delete(
+                        tasklist=list_id, task=task['id']
+                    ).execute()
+
+                    return (
+                        f"✅ Moved '{task['title']}'\n"
+                        f"From: {list_display}\n"
+                        f"To: {target_display}"
+                    )
+
+        return f"No pending task matching '{title_search}' found."
+    except Exception as e:
+        return f"Error moving task: {str(e)}"
+
+
+def tasks_inbox_process():
+    """
+    Show all Main List tasks one by one for processing.
+    Returns a formatted list with suggested destination lists
+    so Mason can say 'move X to Home' etc.
+    """
+    try:
+        print("  [TOOL] Processing inbox")
+        service = get_tasks_service()
+
+        # Find Main List (or first list)
+        inbox_id, inbox_display = find_list_by_name(service, "main")
+        if not inbox_id:
+            all_lists = get_all_task_lists(service)
+            if not all_lists:
+                return "No task lists found."
+            inbox_id, inbox_display = all_lists[0]
+
+        result = service.tasks().list(
+            tasklist=inbox_id, maxResults=100, showCompleted=False
+        ).execute()
+        items = [t for t in result.get('items', []) if t.get('status') == 'needsAction']
+
+        if not items:
+            return f"✅ Your {inbox_display} is empty — nothing to process!"
+
+        content = f"📥 INBOX PROCESSING — {inbox_display} ({len(items)} items):\n\n"
+        content += "For each item, say 'move [task] to [list name]' or 'complete [task]' or 'delete [task]'\n\n"
+
+        for t in items:
+            title   = t.get('title', '(no title)')
+            due     = t.get('due', '')
+            due_str = f" — due {format_due_date(due)}" if due else ""
+            suggested = guess_task_list(title)
+            suggestion = f"\n  💡 Suggested: {suggested}" if suggested else ""
+            content += f"• {title}{due_str}{suggestion}\n"
+
+        content += f"\n\nAvailable lists:\n"
+        content += "\n".join(f"• {name}" for name in LIFE_AREA_LISTS.keys())
+
+        return wrap_display(content.strip())
+    except Exception as e:
+        return f"Error processing inbox: {str(e)}"
+
+
+def tasks_list_summary():
+    """
+    One-shot snapshot of all task lists — pending counts, overdue count,
+    and the oldest overdue item per list. Morning awareness view.
+    """
+    try:
+        print("  [TOOL] Getting task list summary")
+        service = get_tasks_service()
+        all_lists = get_all_task_lists(service)
+        today = datetime.date.today()
+
+        content = f"📊 TASKS SUMMARY ({today.strftime('%A, %B %-d')}):\n"
+        total_pending  = 0
+        total_overdue  = 0
+
+        for list_id, title in all_lists:
+            result = service.tasks().list(
+                tasklist=list_id, maxResults=100, showCompleted=False
+            ).execute()
+            items = [t for t in result.get('items', []) if t.get('status') == 'needsAction']
+
+            pending  = len(items)
+            overdue_items = [t for t in items if is_overdue(t.get('due', ''))]
+            overdue  = len(overdue_items)
+            total_pending += pending
+            total_overdue += overdue
+
+            if pending == 0:
+                content += f"\n✅ {title}: empty"
+                continue
+
+            overdue_str = f" ⚠️ {overdue} overdue" if overdue else ""
+            content += f"\n📋 {title}: {pending} pending{overdue_str}"
+
+            # Show oldest overdue item if any
+            if overdue_items:
+                # Sort by due date ascending to find oldest
+                oldest = sorted(
+                    overdue_items,
+                    key=lambda t: t.get('due', '9999')
+                )[0]
+                days = days_overdue(oldest.get('due', ''))
+                content += f"\n   Most overdue: '{oldest.get('title', '')}' ({days}d)"
+
+        content += f"\n\n📈 Total: {total_pending} pending"
+        if total_overdue:
+            content += f", {total_overdue} overdue ⚠️"
+
+        return wrap_display(content.strip())
+    except Exception as e:
+        return f"Error getting summary: {str(e)}"
+
+
+def tasks_suggest_list(title):
+    """
+    Suggest the best life-area list for a task based on its title.
+    Used by agent when Mason adds a task without specifying a list.
+    """
+    suggested = guess_task_list(title)
+    if suggested:
+        return f"💡 Based on '{title}', I'd suggest adding this to **{suggested}**. Want me to add it there, or a different list?"
+    else:
+        lists = "\n".join(f"• {name}" for name in LIFE_AREA_LISTS.keys())
+        return f"Which list should I add '{title}' to?\n\n{lists}\n\nOr say 'Main List' to keep it in your inbox."
+
+
 if __name__ == "__main__":
     # Quick test
     print(tasks_list_all())

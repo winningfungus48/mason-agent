@@ -568,7 +568,7 @@ tools = [
     # ── Google Tasks ──────────────────────────────────────────────────────
     {
         "name": "tasks_add",
-        "description": "Add a new task to a Google Task list. Use this when Mason says 'add a task', 'create a task', 'remind me to', 'I need to', 'put X on my list', or 'add X to my list'. Use get_day_of_week_date first if Mason mentions a day name for the due date.",
+        "description": "Add a new task to a Google Task list. Use this when Mason says 'add a task', 'remind me to', 'I need to', or 'put X on my list'. Use get_day_of_week_date first if Mason mentions a day name for the due date.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -648,7 +648,7 @@ tools = [
     },
     {
         "name": "tasks_list_all",
-        "description": "Show a summary of all Google Task LIST NAMES with counts and overdue flags. Use ONLY when Mason asks what lists exist — e.g. 'what task lists do I have', 'show all my lists'. Do NOT use for 'create a task', 'add a task', or any request to see tasks inside a list.",
+        "description": "Show a summary of all Google Task LIST NAMES with counts and overdue flags. Use ONLY when Mason asks what lists exist — NOT when Mason wants to see tasks inside a list (use tasks_view for that).",
         "input_schema": {"type": "object", "properties": {}}
     },
     {
@@ -726,6 +726,46 @@ tools = [
         "name": "tasks_calendar_crosscheck",
         "description": "Cross-reference tasks with due dates against Google Calendar to flag tasks due on fully booked days.",
         "input_schema": {"type": "object", "properties": {}}
+    },
+    # ── Phase 13C — Organization ──────────────────────────────────────────
+    {
+        "name": "tasks_setup_lists",
+        "description": "Create all 7 life-area task lists in Google Tasks (Home, Errands & Auto, Finance, Grocery & Essentials, Buy List, Health & Fitness, AI & Learning). Safe to run multiple times — skips existing lists. Use when Mason wants to set up or reset his task list structure.",
+        "input_schema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "tasks_move",
+        "description": "Move a task from one Google Task list to another. Use when Mason says 'move X to Y list' or 'put X in my Home list'.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title_search":  {"type": "string", "description": "Part of the task title to search for"},
+                "target_list":   {"type": "string", "description": "Name of the destination list"},
+                "source_list":   {"type": "string", "description": "Optional source list name to narrow search"}
+            },
+            "required": ["title_search", "target_list"]
+        }
+    },
+    {
+        "name": "tasks_inbox_process",
+        "description": "Show all Main List tasks with suggested destination lists for processing. Use when Mason says 'process my inbox', 'sort my tasks', or 'let's organize my main list'. Shows each task with a smart list suggestion.",
+        "input_schema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "tasks_list_summary",
+        "description": "Show a one-shot snapshot of all task lists with pending counts, overdue counts, and oldest overdue item per list. Use for 'give me a task overview', 'how are my tasks looking', or 'task summary'.",
+        "input_schema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "tasks_suggest_list",
+        "description": "Suggest the best life-area list for a task based on its title. Use when Mason adds a task without specifying a list — ask which list before adding.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "The task title to get a list suggestion for"}
+            },
+            "required": ["title"]
+        }
     },
 ]
 
@@ -1034,6 +1074,12 @@ def build_registry():
         "tasks_bulk_complete":        lambda i: ta.tasks_bulk_complete(i["title_list"], i.get("list_name")),
         "tasks_weekly_summary":       lambda i: ta.tasks_weekly_summary(),
         "tasks_calendar_crosscheck":  lambda i: ta.tasks_calendar_crosscheck(),
+        # Phase 13C
+        "tasks_setup_lists":          lambda i: ta.tasks_setup_lists(),
+        "tasks_move":                 lambda i: ta.tasks_move(i["title_search"], i["target_list"], i.get("source_list")),
+        "tasks_inbox_process":        lambda i: ta.tasks_inbox_process(),
+        "tasks_list_summary":         lambda i: ta.tasks_list_summary(),
+        "tasks_suggest_list":         lambda i: ta.tasks_suggest_list(i["title"]),
     }
 
 TOOL_REGISTRY = build_registry()
@@ -1078,14 +1124,21 @@ SYSTEM_PROMPT = (
     "(6) Use chore_add to add new chores, chore_remove to remove them. "
     "(7) Completed chores are automatically logged to Google Calendar as Graphite all-day events. "
 
-    "TASKS RULES: Mason uses Google Tasks for structured to-do management. "
-    "(1) When Mason says 'add a task' or 'remind me to' use tasks_add. "
+    "TASKS RULES: Mason uses Google Tasks organized into life-area lists: "
+    "🏠 Home, 🚗 Errands & Auto, 💰 Finance, 🛒 Grocery & Essentials, 🛍️ Buy List, 💪 Health & Fitness, 🤖 AI & Learning, plus Main List as inbox. "
+    "(1) When Mason says 'add a task', 'create a task', 'remind me to', 'I need to' — use tasks_add. "
+    "If no list is specified, call tasks_suggest_list first to suggest the right life-area list, then add after Mason confirms. "
+    "If no due date is given, ask 'Does this have a deadline?' before adding. "
     "(2) When Mason asks to see tasks INSIDE a list use tasks_view — never tasks_list_all. "
-    "(3) When a day name is mentioned for a due date, ALWAYS call get_day_of_week_date first. "
+    "(3) When a day name is mentioned for a due date ALWAYS call get_day_of_week_date first. "
     "(4) Use tasks_due_today for 'what's due today', tasks_overdue for overdue, tasks_due_this_week for the week ahead. "
     "(5) tasks_list_all is ONLY for 'what lists do I have' — not for viewing tasks. "
-    "(6) tasks_weekly_summary gives a full weekly overview. "
-    "(7) tasks_calendar_crosscheck finds tasks due on fully booked calendar days. "
+    "(6) tasks_list_summary gives a full snapshot of all lists with counts. "
+    "(7) tasks_inbox_process shows Main List items with suggested destinations for sorting. "
+    "(8) tasks_move moves a task between lists. "
+    "(9) tasks_setup_lists creates all life-area lists — run once to set up. "
+    "(10) tasks_weekly_summary gives a full weekly overview. "
+    "(11) tasks_calendar_crosscheck finds tasks due on fully booked calendar days. "
 
     "CALENDAR RULES: "
     "(1) When user mentions a day by name — ALWAYS call get_day_of_week_date FIRST. Never compute dates in your head. "

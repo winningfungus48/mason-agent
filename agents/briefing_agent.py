@@ -86,6 +86,22 @@ def get_daily_briefing():
         except Exception:
             calendar_today = "Calendar unavailable."
 
+        # Tasks due today and overdue (Google Tasks)
+        try:
+            from agents.tasks_agent import tasks_due_today, tasks_overdue
+            due_today_raw = tasks_due_today()
+            overdue_raw   = tasks_overdue()
+            # Strip DISPLAY_RAW tags for embedding in briefing
+            def strip_display(s):
+                if "[DISPLAY_RAW]" in s:
+                    return s.split("[DISPLAY_RAW]")[1].split("[/DISPLAY_RAW]")[0].strip()
+                return s
+            tasks_due_today_str = strip_display(due_today_raw)
+            tasks_overdue_str   = strip_display(overdue_raw)
+        except Exception:
+            tasks_due_today_str = "Google Tasks unavailable."
+            tasks_overdue_str   = ""
+
         return f"""
 DATE: {today}
 
@@ -95,6 +111,10 @@ WEATHER (Houston, TX):
 TODAYS CALENDAR:
 {calendar_today}
 
+TASKS DUE TODAY:
+{tasks_due_today_str}
+
+{f"OVERDUE TASKS:{chr(10)}{tasks_overdue_str}{chr(10)}" if tasks_overdue_str and "No overdue" not in tasks_overdue_str else ""}
 BREAKING / MAJOR NEWS:
 {breaking}
 
