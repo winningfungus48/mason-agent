@@ -1256,7 +1256,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id      = str(update.effective_chat.id)
     user_message = update.message.text
 # Deploy command
-    if user_message.strip().lower() == "/deploy":
+    if user_message.strip().lower() == "deploy":
         await update.message.reply_text("🔄 Deploying latest code...")
         import subprocess
         result = subprocess.run(
