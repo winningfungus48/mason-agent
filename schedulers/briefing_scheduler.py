@@ -1,7 +1,7 @@
 """
 briefing_scheduler.py
 ---------------------
-Run this script via Windows Task Scheduler every morning at 6:00 AM.
+Run via cron on the DigitalOcean server (America/Chicago), e.g. every morning ~6:00 AM.
 It generates Mason's daily briefing and sends it to Telegram automatically.
 """
 

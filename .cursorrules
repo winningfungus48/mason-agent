@@ -1,0 +1,270 @@
+# .cursorrules — Mason's Personal AI Agent
+
+## Project Overview
+This is a personal AI agent (life operating system) accessible via Telegram. It runs 24/7 on a DigitalOcean droplet (Ubuntu 24.04, `/home/mason/agent`). The agent is built with Python + Anthropic Claude API and connects to Google Calendar, Google Tasks, Telegram, and Tavily search.
+
+**GitHub repo:** `winningfungus48/mason-agent`
+**Deploy workflow:** `git push` → send `deploy` in Telegram → done
+
+### Environment of record
+- **Production:** DigitalOcean (Ubuntu), project root `/home/mason/agent`. The long-running agent is managed by **systemd**; automation uses **cron** in **America/Chicago**.
+- **Secrets:** `/home/mason/agent/.env` — loaded by systemd (or the process); never committed.
+- **Local Windows** (venv, old batch files): optional backup only, not the primary workflow.
+
+### Coordinator workflow (Mason + Claude app + Cursor)
+
+Mason is the **coordinator**: he sets direction and approves work. He does **not** routinely edit code or run Git/GitHub by hand—**Cursor (this environment)** implements changes, runs tests, commits, pushes, and interacts with GitHub **when Mason asks**. Mason stays out of the weeds unless he chooses to.
+
+| Role | Use for |
+|------|---------|
+| **Claude** (Anthropic chat / app / projects—*not* the agent’s API in `agent.py`) | Brainstorming, comparing options, planning, acceptance criteria, risk review, “how should we…” questions. Paste conclusions into Cursor when ready to build. |
+| **Cursor** | Development, refactors, running checks, Git operations, PRs, deployment **mechanics** (push, CI), and keeping this repo aligned with these rules. |
+| **Mason** | Priorities, approvals, Telegram `deploy`, secrets in `.env` on the server—**not** day-to-day file churn. |
+
+**Authority:** This file (`.cursorrules`) is the **live spec** for how the codebase behaves. `Personal Agent - Step by Step.md` is a **historical build log only**—never treat it as requirements; if it conflicts with `.cursorrules`, **`.cursorrules` wins**.
+
+**Handoffs:** For non-trivial features or multi-file refactors, start from a short brief (problem, acceptance criteria, out-of-scope). That brief may come from Mason or from a Claude planning session—Cursor implements against it.
+
+**Automation:** Prefer CI (e.g. GitHub Actions) and repo scripts over expecting Mason to run linters/tests locally. Cursor should keep automation green before Mason needs to intervene.
+
+---
+
+## Folder Structure
+
+```
+agent/
+├── agent.py                  # Thin orchestrator — Telegram bot, agent loop, tool registry
+├── agents/
+│   ├── calendar_agent.py     # Google Calendar (full CRUD, recurrence, colors, smart scheduling)
+│   ├── tasks_agent.py        # Google Tasks (17 tools, 7 life-area lists)
+│   ├── habits_agent.py       # Habit tracking (workout, water, stretching)
+│   ├── lists_agent.py        # Smart list manager + grocery categorization
+│   ├── chores_agent.py       # Chores and home maintenance scheduling
+│   ├── briefing_agent.py     # Daily briefing, weather, news
+│   └── meal_agent.py         # Meal planning sub-agent (standalone Claude call)
+├── core/
+│   ├── config.py             # All constants — timezone, paths, habit names, list names, color maps
+│   ├── google_auth.py        # Single OAuth handler shared by Calendar and Tasks
+│   ├── display.py            # wrap_display() utility for DISPLAY_RAW system
+│   └── telegram_utils.py     # Shared Telegram send/chunking logic
+├── schedulers/               # All cron-triggered scripts
+│   ├── briefing_scheduler.py
+│   ├── chore_scheduler.py
+│   ├── habit_scheduler.py
+│   ├── meal_scheduler.py
+│   ├── tasks_scheduler.py
+│   ├── weekly_prep_scheduler.py
+│   ├── calendar_audit_scheduler.py
+│   └── inbox_review_scheduler.py
+└── documents/                # All user data files (lists, habits, chores, etc.)
+```
+
+---
+
+## Core Architecture Rules
+
+### agent.py stays thin
+`agent.py` contains only:
+- Tool definitions (the JSON schema dicts Claude sees)
+- Tool registry (dict mapping tool names → lambda calls into agent files)
+- `run_tool()` router
+- `run_agent_conversational()` agent loop
+- Telegram bot handler
+- System prompt
+- Core utility functions (calculator, file read/write, web search, date)
+
+**Never add domain logic to agent.py.** All domain logic lives in `agents/`.
+
+### Adding a new tool — the exact pattern
+1. Add the function to the appropriate file in `agents/`
+2. Add the tool schema to the `tools` list in `agent.py`
+3. Add one line to `TOOL_REGISTRY` in `agent.py`:
+   ```python
+   "tool_name": lambda i: agent_module.function_name(i["param"], i.get("optional")),
+   ```
+4. Add instructions to `SYSTEM_PROMPT` in `agent.py` if Claude needs guidance on when to use it
+
+That's it. Never use if/elif chains — always use the registry dict.
+
+### Adding a new agent module
+Create `agents/new_agent.py`. Import it in `agent.py`:
+```python
+from agents import new_agent
+```
+Reference it in the registry as `new_agent.function_name`.
+
+---
+
+## DISPLAY_RAW System — Critical
+
+Any tool that **shows data** to Mason must wrap its output with `wrap_display()` from `core/display.py`:
+
+```python
+from core.display import wrap_display
+
+def my_view_tool():
+    content = "... the data ..."
+    return wrap_display(content)
+```
+
+`wrap_display()` wraps content in `[DISPLAY_RAW]...[/DISPLAY_RAW]` tags. The agent loop intercepts this, sends the raw content directly to Telegram, and gives Claude only a placeholder. Claude never sees or summarizes the data.
+
+**Use wrap_display() for any tool that:**
+- Views a list
+- Shows tasks, habits, chores, calendar events
+- Displays a meal plan
+- Returns a report or log
+
+**Do NOT use wrap_display() for:**
+- Tools that write/modify data (they return a confirmation string)
+- Tools that return a single value Claude needs to reason about
+
+---
+
+## Google APIs
+
+### Auth
+Both Calendar and Tasks use a single shared OAuth token via `core/google_auth.py`. Never manage OAuth tokens directly in agent files — always call `google_auth.get_calendar_service()` or `google_auth.get_tasks_service()`.
+
+### Google Tasks — critical gotcha
+Always use `patch()` not `update()` when marking tasks complete. `update()` silently fails because list-returned task objects are missing required fields.
+
+```python
+# CORRECT
+service.tasks().patch(
+    tasklist=list_id,
+    task=task_id,
+    body={
+        'status': 'completed',
+        'completed': datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.000Z')
+    }
+).execute()
+
+# WRONG — silently fails
+service.tasks().update(...).execute()
+```
+
+---
+
+## Tool Description Rules
+
+Tool descriptions must include **explicit negative cases** to prevent Claude from picking the wrong tool:
+
+```python
+{
+    "name": "tasks_view",
+    "description": "Show tasks INSIDE a list. Use when Mason asks to see tasks in a list. Do NOT use tasks_list_all for this.",
+    ...
+}
+```
+
+Always specify:
+- When TO use this tool (trigger phrases)
+- When NOT to use this tool (common confusion cases)
+
+---
+
+## Datetime Rules
+
+- **Never compute dates in Python logic.** If Mason says "next Wednesday", call `get_day_of_week_date` first.
+- Always use Houston timezone: `America/Chicago`
+- Import timezone from `core/config.py` — never hardcode `"America/Chicago"` in agent files
+- The `get_current_date` tool exists because Claude defaults to training data year — always call it before time-sensitive operations
+
+---
+
+## File Conventions
+
+### documents/ folder
+All user data lives in `documents/`. Access the path via `core/config.py`:
+```python
+from core.config import DOCUMENTS_DIR
+filepath = os.path.join(DOCUMENTS_DIR, "filename.txt")
+```
+Never hardcode paths.
+
+### Data file formats
+- **habits.txt:** `[YYYY-MM-DD] habit: ✅/❌ — note`
+- **chore_history.txt:** `[YYYY-MM-DD] chore name — optional note`
+- **tasks.txt (local):** `[CATEGORY] task | priority:high | status:pending`
+- **chores.txt:** `[FREQUENCY] chore name` (DAILY, WEEKLY-SAT, MONTHLY, etc.)
+- **grocery.txt:** `[Category] item name`
+
+---
+
+## System Prompt Style
+
+Keep additions to `SYSTEM_PROMPT` in `agent.py` short and instruction-focused. Format:
+```
+SECTION NAME RULES:
+(1) When Mason says X — use tool_name.
+(2) When Mason asks Y — use other_tool.
+```
+Never write paragraphs. Numbered rules only.
+
+---
+
+## Error Handling
+
+Every tool function must have a top-level try/except:
+```python
+def my_tool(param):
+    try:
+        # logic
+        return "Success message"
+    except Exception as e:
+        return f"Error: {str(e)}"
+```
+
+File tools also need path security checks:
+```python
+if "/" in filename or "\\" in filename:
+    return "Error: Filename cannot contain path separators."
+```
+
+---
+
+## Scheduler Scripts
+
+All schedulers live in `schedulers/`. They need a `sys.path` fix at the top to import from the project root:
+```python
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+```
+
+Schedulers are triggered by **cron** on the DigitalOcean server (America/Chicago).
+
+---
+
+## Environment Variables
+
+All secrets come from environment variables, never hardcoded:
+- `ANTHROPIC_API_KEY`
+- `TAVILY_API_KEY`
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_CHAT_ID`
+
+On the server, set these in `/home/mason/agent/.env` and load via systemd (`EnvironmentFile=`) or equivalent — not hardcoded in unit files.
+
+---
+
+## Deploy Workflow
+
+```bash
+# After changes are merged (Mason may delegate git add/commit/push to Cursor)
+git add .
+git commit -m "description of change"
+git push
+
+# In Telegram
+deploy
+```
+
+The `deploy` message triggers `deploy.sh` on the server which pulls, installs deps, and restarts the systemd service.
+
+---
+
+## Model
+
+Always use `claude-sonnet-4-20250514` for all Claude API calls in this project. Bump the model ID only when you intentionally change it project-wide.
+`max_tokens=4096` for the main agent loop, `max_tokens=2048` for meal agent, `max_tokens=200` for DISPLAY_RAW follow-up calls.

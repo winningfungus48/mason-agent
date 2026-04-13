@@ -1,7 +1,7 @@
 """
 meal_scheduler.py
 -----------------
-Run via Windows Task Scheduler every Friday evening.
+Run via cron on the DigitalOcean server (America/Chicago), e.g. every Friday evening.
 Generates Mason's weekly meal plan and sends it to Telegram.
 Asks Mason if he wants to update his grocery list.
 """

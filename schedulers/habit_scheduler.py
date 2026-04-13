@@ -1,7 +1,7 @@
 """
 habit_scheduler.py
 -------------------
-Run via Windows Task Scheduler twice daily:
+Run via cron on the DigitalOcean server (America/Chicago) twice daily:
 - Morning (e.g. 8:00 AM) — asks if yesterday's habits were completed
 - Evening (e.g. 8:00 PM) — asks if today's habits were completed
 

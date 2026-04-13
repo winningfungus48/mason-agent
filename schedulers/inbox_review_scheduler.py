@@ -1,7 +1,7 @@
 """
 schedulers/inbox_review_scheduler.py
 -------------------------------------
-Run via cron every Saturday morning.
+Run via cron on the DigitalOcean server (America/Chicago), e.g. Saturday morning.
 If Main List has pending items, sends a nudge to process the inbox.
 Stays silent if the inbox is empty.
 """

@@ -1,7 +1,7 @@
 """
 chore_scheduler.py
 ------------------
-Run this via Windows Task Scheduler every morning.
+Run via cron on the DigitalOcean server (America/Chicago), e.g. every morning.
 On Saturday and Sunday it sends Mason his chores for the day via Telegram.
 On the 1st of each month it also sends monthly maintenance reminders.
 On the 1st of Jan/Apr/Jul/Oct it sends quarterly reminders.

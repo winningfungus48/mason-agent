@@ -1,7 +1,7 @@
 """
 tasks_scheduler.py
 ------------------
-Run via Windows Task Scheduler daily (suggested: 8:30 AM, after morning briefing).
+Run via cron on the DigitalOcean server (America/Chicago) daily (e.g. ~8:30 AM after morning briefing).
 Checks for overdue tasks and tasks due today. Sends a Telegram nudge if anything needs attention.
 Skips silently if everything is clear.
 """

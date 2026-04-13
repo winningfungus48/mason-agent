@@ -1,7 +1,7 @@
 """
 weekly_prep_scheduler.py
 -------------------------
-Run via Windows Task Scheduler every Monday morning.
+Run via cron on the DigitalOcean server (America/Chicago), e.g. every Monday morning.
 Sends Mason his weekly calendar prep report via Telegram.
 """
 

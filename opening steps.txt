@@ -1,5 +1,0 @@
-cd my-first-agent
-venv\Scripts\activate
-set ANTHROPIC_API_KEY=your-key-here
-set TAVILY_API_KEY=your-key-here
-python agent.py

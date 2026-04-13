@@ -1,0 +1,15 @@
+[Unit]
+Description=Mason API
+After=network.target
+
+[Service]
+Type=simple
+User=mason
+WorkingDirectory=/home/mason/agent
+EnvironmentFile=/home/mason/agent/.env
+ExecStart=/home/mason/agent/venv/bin/uvicorn api:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

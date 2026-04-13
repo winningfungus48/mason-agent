@@ -1,7 +1,7 @@
 """
 calendar_audit_scheduler.py
 ----------------------------
-Run via Windows Task Scheduler every 2 weeks.
+Run via cron on the DigitalOcean server (America/Chicago), e.g. every 2 weeks.
 Scans for uncategorized calendar events and sends Mason a Telegram message.
 """
 
