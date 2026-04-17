@@ -10,10 +10,11 @@ import anthropic
 import math
 import os
 import asyncio
-from datetime import date
+from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 from tavily import TavilyClient
 from telegram import Update
-from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
 # ── Agent imports ──────────────────────────────────────────────────────────
 from agents import calendar_agent, tasks_agent, habits_agent
@@ -1249,6 +1250,8 @@ def run_agent_conversational(messages):
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID")
 
+START_TIME = datetime.now(timezone.utc)
+
 conversation_histories = {}
 
 
@@ -1288,6 +1291,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(chunk)
 
 
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    now_utc = datetime.now(timezone.utc)
+    uptime  = now_utc - START_TIME
+    total_seconds = int(uptime.total_seconds())
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    uptime_str = f"{hours}h {minutes}m {seconds}s"
+
+    now_houston = now_utc.astimezone(ZoneInfo("America/Chicago"))
+    houston_str = now_houston.strftime("%A, %B %d, %Y at %I:%M:%S %p %Z")
+
+    await update.message.reply_text(
+        f"✅ Bot is alive!\n\n"
+        f"⏱ Uptime: {uptime_str}\n"
+        f"🕐 Houston time: {houston_str}"
+    )
+
+
 def main():
     if not TELEGRAM_BOT_TOKEN:
         print("Error: TELEGRAM_BOT_TOKEN is not set.")
@@ -1300,6 +1321,7 @@ def main():
     print("Telegram bot is running. Message your bot to get started!")
 
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+    app.add_handler(CommandHandler("status", status_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.run_polling()
 
