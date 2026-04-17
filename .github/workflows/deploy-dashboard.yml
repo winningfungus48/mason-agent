@@ -35,6 +35,9 @@ jobs:
       - name: Build
         working-directory: dashboard
         run: npm run build -- --base=/mason-agent/
+        env:
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
+          VITE_API_KEY: ${{ secrets.VITE_API_KEY }}
 
       - uses: actions/upload-pages-artifact@v3
         with:
