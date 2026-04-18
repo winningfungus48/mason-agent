@@ -53,30 +53,24 @@ See `api.env.example` in the repo root for a paste-friendly template.
 
 The FastAPI app uses the **same** Google OAuth files and code as the Telegram bot (`core/google_auth.py`, `agents/calendar_agent.py`, `agents/tasks_agent.py`). **No second Google project or token** is required if Calendar/Tasks already work in Telegram.
 
-**Where files must live**
+**Where files live**
 
 | File | Path on droplet | Notes |
 |------|------------------|--------|
-| `credentials.json` | `/home/mason/agent/credentials.json` | OAuth client (Desktop) from Google Cloud — **gitignored** |
-| `token.json` | `/home/mason/agent/token.json` | Refreshed access token — **gitignored**, same file the bot uses |
-| `credentials_web.json` | `/home/mason/agent/credentials_web.json` | **Web application** OAuth client JSON (Path A — dashboard **Connect Google**). **gitignored** |
+| `credentials.json` | `/home/mason/agent/credentials.json` | **Same file Telegram uses** — **gitignored** |
+| `token.json` | `/home/mason/agent/token.json` | Written after you click **Connect** in the dashboard (or legacy scripts) — **gitignored** |
 
-`mason-api.service` sets **`WorkingDirectory=/home/mason/agent`**, so `api.py` resolves these paths the same way as `mason-agent.service` for Telegram.
+`mason-api.service` uses **`WorkingDirectory=/home/mason/agent`**.
 
-### Path A — Connect Google from the dashboard (recommended)
+### Connect Google (minimal)
 
-1. **Google Cloud Console** → APIs & Services → Credentials → **Create credentials** → **OAuth client ID** → type **Web application**.  
-2. **Authorized redirect URIs** — add exactly:  
-   `https://<your-public-api-host>/auth/google/callback`  
-   (e.g. ngrok HTTPS URL or your reverse proxy). For local API only: `http://127.0.0.1:8000/auth/google/callback` (must still be registered).  
-3. Download the client JSON → on the droplet save as **`/home/mason/agent/credentials_web.json`** (see `credentials_web.example.json` in the repo).  
-4. In **`/home/mason/agent/.env`** set:  
-   - **`GOOGLE_OAUTH_REDIRECT_URI`** — the **same** URL as in step 2 (full string, no trailing slash on path before `?`).  
-   - Optional **`DASHBOARD_GOOGLE_SUCCESS_REDIRECT`** — where Google sends the user after success (e.g. your GitHub Pages dashboard URL with `?google_connected=1`). If omitted, the first entry in **`DASHBOARD_CORS_ORIGINS`** is used.  
-5. **`sudo systemctl restart mason-api`**.  
-6. Open the **dashboard**, sign in with **`DASHBOARD_PASSWORD`**, click **Connect Google**, complete Google sign-in in the browser. **`token.json`** is written on the server — **Telegram and the API** both use it.
+1. In **Google Cloud Console** → your **existing** OAuth client (the one behind `credentials.json`) → **Authorized redirect URIs** → **Add URI** exactly:  
+   `http://127.0.0.1:8000/auth/google/callback`  
+   If the API is reached via **HTTPS** (ngrok, etc.), add that callback too, e.g. `https://YOUR_HOST/auth/google/callback`, and set **`PUBLIC_BASE_URL=https://YOUR_HOST`** in `.env` (or **`GOOGLE_OAUTH_REDIRECT_URI`** to the full callback URL).  
+2. Restart the API: **`sudo systemctl restart mason-api`**.  
+3. Open the dashboard → sign in → **Connect** → finish in the browser. **`token.json`** is saved on the server; Telegram keeps using the same folder.
 
-No `scp` of `token.json` is required for Path A.
+No second JSON file and no `scp` for `token.json`.
 
 **Quick checks (SSH on the droplet)**
 
@@ -94,34 +88,9 @@ curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8000/health
 - Inspect **`logs/api.log`** on the droplet for Google API errors.
 - Ensure **Google Calendar API** and **Google Tasks API** are enabled in the same Cloud project as your OAuth client.
 
-**If the API returns `invalid_grant` / “Token has been expired or revoked”**
+**If the API returns `invalid_grant`**
 
-That is **Google OAuth** (not the dashboard password). Replace **`token.json` on the droplet** with a fresh token — **no manual scp** required if you use the flow below.
-
-**Preferred — OAuth on the droplet via SSH tunnel (Windows)**
-
-1. `git pull` on the droplet so **`scripts/google_reauth.py`** and **`scripts/droplet-google-oauth.ps1`** exist.
-2. On your **PC** (PowerShell, repo root), with SSH working to the droplet:
-
-   ```powershell
-   .\scripts\droplet-google-oauth.ps1 -DropletHost YOUR_DROPLET_PUBLIC_IPV4
-   ```
-
-   Use the **Public IPv4** shown in **DigitalOcean → Droplets** (copy/paste). Do not assume an example IP from the docs — if **`ssh mason@YOUR_IP`** from PowerShell does not connect, fix SSH/firewall first.
-
-   This starts a tunnel **localhost:8765 → droplet:8765**, runs **`python scripts/google_reauth.py --droplet`** **on the server**, and restarts **`mason-api`** / **`mason-agent`**. When the script prints a Google URL, open it in your **PC browser** and sign in; Google redirects to **http://localhost:8765/**, which the tunnel forwards to the droplet so **`token.json`** is written **on the server**.
-
-**Manual (two terminals on PC)**
-
-1. Terminal A: `ssh -N -L 8765:127.0.0.1:8765 mason@YOUR_DROPLET`
-2. Terminal B: `ssh mason@YOUR_DROPLET` then  
-   `cd /home/mason/agent && source venv/bin/activate && python scripts/google_reauth.py --droplet`  
-   Open the printed URL in your PC browser. Then:  
-   `sudo systemctl restart mason-api mason-agent`
-
-**Laptop-only (token file stays on PC)** — run **`python scripts/google_reauth.py`** (no `--droplet`); still need **`scp token.json`** to the droplet if the API runs there.
-
-**Laptop dev:** Point **`dashboard/.env.local`** at your **HTTPS** droplet/ngrok API so Calendar/Tasks use server-side **`token.json`**.
+Click **Connect** on the dashboard again (after fixing **redirect URIs** in Google Cloud to match your API URL). If the dashboard cannot reach the API, use **`python scripts/google_reauth.py`** on a machine that has **`credentials.json`** and copy the new **`token.json`** to the server only if needed.
 
 ---
 

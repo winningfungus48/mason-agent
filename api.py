@@ -7,7 +7,7 @@ Auth (no third-party IdP):
   - POST /auth/login with { "password": "<DASHBOARD_PASSWORD>" } → Bearer token (signed, itsdangerous).
   - Protected routes: Authorization: Bearer <token> OR X-API-Key: <DASHBOARD_API_KEY> (optional automation).
   - Env: SESSION_SECRET, DASHBOARD_PASSWORD, DASHBOARD_CORS_ORIGINS (comma-separated). Optional: DASHBOARD_API_KEY.
-  - Google (Path A): GOOGLE_OAUTH_REDIRECT_URI + credentials_web.json (Web client). Dashboard "Connect Google" writes token.json.
+  - Google: credentials.json + redirect /auth/google/callback (see PUBLIC_BASE_URL). "Connect Google" writes token.json.
 """
 
 from __future__ import annotations
@@ -41,6 +41,7 @@ os.chdir(BASE_DIR)
 from agent import run_agent_conversational
 from agents import briefing_agent, chores_agent, habits_agent, lists_agent, tasks_agent
 from core.config import (
+    CREDS_PATH,
     DOCUMENTS_DIR,
     GROCERY_CATEGORIES,
     GOOGLE_SCOPES,
@@ -76,10 +77,6 @@ _cors_raw = os.getenv(
     "http://127.0.0.1:5173,http://127.0.0.1:5174",
 )
 ALLOWED_ORIGINS = [o.strip().rstrip("/") for o in _cors_raw.split(",") if o.strip()]
-
-# Web OAuth (Path A): Google "Web application" client + redirect to /auth/google/callback
-GOOGLE_WEB_SECRETS = os.getenv("GOOGLE_OAUTH_CLIENT_SECRETS", str(BASE_DIR / "credentials_web.json"))
-GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_OAUTH_REDIRECT_URI", "").strip()
 
 BRIEF_CACHE_FILE = os.path.join(DOCUMENTS_DIR, "last_brief.txt")
 
@@ -133,16 +130,27 @@ def _oauth_state_serializer() -> Optional[URLSafeTimedSerializer]:
     return URLSafeTimedSerializer(SESSION_SECRET, salt="mason-google-oauth-state-v1")
 
 
+def _oauth_redirect_uri() -> str:
+    """Callback URL Google redirects to — must match one URI in Google Cloud for this OAuth client."""
+    explicit = os.getenv("GOOGLE_OAUTH_REDIRECT_URI", "").strip()
+    if explicit:
+        return explicit
+    base = os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
+    if not base:
+        base = "http://127.0.0.1:8000"
+    return f"{base}/auth/google/callback"
+
+
 def _google_flow():
     from google_auth_oauthlib.flow import Flow
 
-    p = Path(GOOGLE_WEB_SECRETS)
-    if not p.is_file() or not GOOGLE_REDIRECT_URI:
+    p = Path(CREDS_PATH)
+    if not p.is_file():
         return None
     return Flow.from_client_secrets_file(
         str(p),
         scopes=GOOGLE_SCOPES,
-        redirect_uri=GOOGLE_REDIRECT_URI,
+        redirect_uri=_oauth_redirect_uri(),
     )
 
 
@@ -786,10 +794,8 @@ async def auth_me(
 
 @app.get("/auth/google/config")
 async def google_oauth_config():
-    """Public: lets the dashboard show Connect Google when web OAuth is configured."""
-    p = Path(GOOGLE_WEB_SECRETS)
-    ready = p.is_file() and bool(GOOGLE_REDIRECT_URI)
-    return {"web_oauth_ready": ready}
+    """Public: show Connect Google when credentials.json exists (same file Telegram uses)."""
+    return {"web_oauth_ready": Path(CREDS_PATH).is_file()}
 
 
 @app.post("/auth/google/start", dependencies=[Auth])
@@ -807,8 +813,8 @@ async def google_oauth_start():
             status_code=503,
             detail={
                 "error": (
-                    "Google web OAuth not configured. Set GOOGLE_OAUTH_REDIRECT_URI and "
-                    "add credentials_web.json (Web application client). See docs."
+                    "Missing credentials.json (same OAuth client as Telegram). "
+                    "Add redirect URI in Google Cloud: " + _oauth_redirect_uri()
                 ),
             },
         )

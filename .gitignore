@@ -3,7 +3,6 @@
 .env.dev
 token.json
 credentials.json
-credentials_web.json
 launch_agent.bat
 
 # Python
