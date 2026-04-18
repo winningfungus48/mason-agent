@@ -88,8 +88,10 @@ That is **Google OAuth** (not the dashboard password). Replace **`token.json` on
 2. On your **PC** (PowerShell, repo root), with SSH working to the droplet:
 
    ```powershell
-   .\scripts\droplet-google-oauth.ps1 -DropletHost YOUR_DROPLET_IP
+   .\scripts\droplet-google-oauth.ps1 -DropletHost YOUR_DROPLET_PUBLIC_IPV4
    ```
+
+   Use the **Public IPv4** shown in **DigitalOcean → Droplets** (copy/paste). Do not assume an example IP from the docs — if **`ssh mason@YOUR_IP`** from PowerShell does not connect, fix SSH/firewall first.
 
    This starts a tunnel **localhost:8765 → droplet:8765**, runs **`python scripts/google_reauth.py --droplet`** **on the server**, and restarts **`mason-api`** / **`mason-agent`**. When the script prints a Google URL, open it in your **PC browser** and sign in; Google redirects to **http://localhost:8765/**, which the tunnel forwards to the droplet so **`token.json`** is written **on the server**.
 
