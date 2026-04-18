@@ -16,6 +16,9 @@ documents/
 logs/
 *.log
 
+# Internal planning (local only)
+future-features.md
+
 # Windows artifacts
 Thumbs.db
 desktop.ini
