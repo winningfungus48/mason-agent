@@ -78,6 +78,20 @@ curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8000/health
 - Inspect **`logs/api.log`** on the droplet for Google API errors.
 - Ensure **Google Calendar API** and **Google Tasks API** are enabled in the same Cloud project as your OAuth client.
 
+**If the API returns `invalid_grant` / “Token has been expired or revoked”**
+
+That message is from **Google OAuth**, not the dashboard password. The refresh token in **`token.json`** is no longer valid (revoked in Google Account, app unused too long, or password changed). Fix:
+
+1. On your **laptop** (with a browser), in a clone of this repo that has **`credentials.json`** in the repo root, run:  
+   `python scripts/google_reauth.py`  
+   Complete the browser sign-in; this writes a new **`token.json`** with Calendar + Tasks scopes.
+2. Copy it to the droplet:  
+   `scp token.json mason@YOUR_DROPLET:/home/mason/agent/`  
+   (Back up the old `token.json` on the droplet first if you want.)
+3. `sudo systemctl restart mason-api` (and `mason-agent` if the bot should pick it up too).
+
+You cannot run the browser OAuth step on a **headless** droplet; always re-auth on a desktop machine, then upload **`token.json`**.
+
 **Laptop dev:** To hit the **droplet API** (so Google runs on the server), set **`dashboard/.env.local`** to your **HTTPS** API URL (ngrok or reverse proxy), not `127.0.0.1:8000`. Copying `token.json` to your PC is optional and duplicates secrets — prefer calling the droplet.
 
 ---
