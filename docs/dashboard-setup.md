@@ -59,8 +59,24 @@ The FastAPI app uses the **same** Google OAuth files and code as the Telegram bo
 |------|------------------|--------|
 | `credentials.json` | `/home/mason/agent/credentials.json` | OAuth client (Desktop) from Google Cloud — **gitignored** |
 | `token.json` | `/home/mason/agent/token.json` | Refreshed access token — **gitignored**, same file the bot uses |
+| `credentials_web.json` | `/home/mason/agent/credentials_web.json` | **Web application** OAuth client JSON (Path A — dashboard **Connect Google**). **gitignored** |
 
 `mason-api.service` sets **`WorkingDirectory=/home/mason/agent`**, so `api.py` resolves these paths the same way as `mason-agent.service` for Telegram.
+
+### Path A — Connect Google from the dashboard (recommended)
+
+1. **Google Cloud Console** → APIs & Services → Credentials → **Create credentials** → **OAuth client ID** → type **Web application**.  
+2. **Authorized redirect URIs** — add exactly:  
+   `https://<your-public-api-host>/auth/google/callback`  
+   (e.g. ngrok HTTPS URL or your reverse proxy). For local API only: `http://127.0.0.1:8000/auth/google/callback` (must still be registered).  
+3. Download the client JSON → on the droplet save as **`/home/mason/agent/credentials_web.json`** (see `credentials_web.example.json` in the repo).  
+4. In **`/home/mason/agent/.env`** set:  
+   - **`GOOGLE_OAUTH_REDIRECT_URI`** — the **same** URL as in step 2 (full string, no trailing slash on path before `?`).  
+   - Optional **`DASHBOARD_GOOGLE_SUCCESS_REDIRECT`** — where Google sends the user after success (e.g. your GitHub Pages dashboard URL with `?google_connected=1`). If omitted, the first entry in **`DASHBOARD_CORS_ORIGINS`** is used.  
+5. **`sudo systemctl restart mason-api`**.  
+6. Open the **dashboard**, sign in with **`DASHBOARD_PASSWORD`**, click **Connect Google**, complete Google sign-in in the browser. **`token.json`** is written on the server — **Telegram and the API** both use it.
+
+No `scp` of `token.json` is required for Path A.
 
 **Quick checks (SSH on the droplet)**
 

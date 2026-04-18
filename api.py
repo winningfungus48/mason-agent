@@ -7,6 +7,7 @@ Auth (no third-party IdP):
   - POST /auth/login with { "password": "<DASHBOARD_PASSWORD>" } → Bearer token (signed, itsdangerous).
   - Protected routes: Authorization: Bearer <token> OR X-API-Key: <DASHBOARD_API_KEY> (optional automation).
   - Env: SESSION_SECRET, DASHBOARD_PASSWORD, DASHBOARD_CORS_ORIGINS (comma-separated). Optional: DASHBOARD_API_KEY.
+  - Google (Path A): GOOGLE_OAUTH_REDIRECT_URI + credentials_web.json (Web client). Dashboard "Connect Google" writes token.json.
 """
 
 from __future__ import annotations
@@ -24,11 +25,11 @@ from urllib.parse import unquote
 
 import zoneinfo
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from pydantic import BaseModel, Field
 
@@ -42,12 +43,14 @@ from agents import briefing_agent, chores_agent, habits_agent, lists_agent, task
 from core.config import (
     DOCUMENTS_DIR,
     GROCERY_CATEGORIES,
+    GOOGLE_SCOPES,
     HABITS,
     HABIT_FILE,
     LISTS,
     QUARTERLY_MONTHS,
     ANNUAL_MONTHS,
     TIMEZONE,
+    TOKEN_PATH,
     WEEKDAY_TAGS,
 )
 
@@ -73,6 +76,10 @@ _cors_raw = os.getenv(
     "http://127.0.0.1:5173,http://127.0.0.1:5174",
 )
 ALLOWED_ORIGINS = [o.strip().rstrip("/") for o in _cors_raw.split(",") if o.strip()]
+
+# Web OAuth (Path A): Google "Web application" client + redirect to /auth/google/callback
+GOOGLE_WEB_SECRETS = os.getenv("GOOGLE_OAUTH_CLIENT_SECRETS", str(BASE_DIR / "credentials_web.json"))
+GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_OAUTH_REDIRECT_URI", "").strip()
 
 BRIEF_CACHE_FILE = os.path.join(DOCUMENTS_DIR, "last_brief.txt")
 
@@ -118,6 +125,39 @@ def _bearer_token_valid(authorization: Optional[str]) -> bool:
         return data.get("sub") == "mason"
     except (BadSignature, SignatureExpired, Exception):
         return False
+
+
+def _oauth_state_serializer() -> Optional[URLSafeTimedSerializer]:
+    if not SESSION_SECRET:
+        return None
+    return URLSafeTimedSerializer(SESSION_SECRET, salt="mason-google-oauth-state-v1")
+
+
+def _google_flow():
+    from google_auth_oauthlib.flow import Flow
+
+    p = Path(GOOGLE_WEB_SECRETS)
+    if not p.is_file() or not GOOGLE_REDIRECT_URI:
+        return None
+    return Flow.from_client_secrets_file(
+        str(p),
+        scopes=GOOGLE_SCOPES,
+        redirect_uri=GOOGLE_REDIRECT_URI,
+    )
+
+
+def _google_success_redirect_url() -> str:
+    explicit = os.getenv("DASHBOARD_GOOGLE_SUCCESS_REDIRECT", "").strip().rstrip("/")
+    if explicit:
+        return explicit if "?" in explicit else explicit + "?google_connected=1"
+    if ALLOWED_ORIGINS:
+        return ALLOWED_ORIGINS[0].rstrip("/") + "/?google_connected=1"
+    return "http://localhost:5173/?google_connected=1"
+
+
+def _token_path_write() -> str:
+    return TOKEN_PATH if isinstance(TOKEN_PATH, str) else str(TOKEN_PATH)
+
 
 # Google Calendar default color IDs → hex (approximate)
 GCAL_COLOR_HEX = {
@@ -742,6 +782,79 @@ async def auth_me(
     if _bearer_token_valid(authorization):
         return {"authenticated": True, "via": "bearer"}
     return {"authenticated": False}
+
+
+@app.get("/auth/google/config")
+async def google_oauth_config():
+    """Public: lets the dashboard show Connect Google when web OAuth is configured."""
+    p = Path(GOOGLE_WEB_SECRETS)
+    ready = p.is_file() and bool(GOOGLE_REDIRECT_URI)
+    return {"web_oauth_ready": ready}
+
+
+@app.post("/auth/google/start", dependencies=[Auth])
+async def google_oauth_start():
+    """Returns Google authorization URL (requires dashboard Bearer token)."""
+    ser = _oauth_state_serializer()
+    if ser is None:
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "SESSION_SECRET not configured"},
+        )
+    flow = _google_flow()
+    if flow is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": (
+                    "Google web OAuth not configured. Set GOOGLE_OAUTH_REDIRECT_URI and "
+                    "add credentials_web.json (Web application client). See docs."
+                ),
+            },
+        )
+    state = ser.dumps({"sub": "mason"})
+    authorization_url, _ = flow.authorization_url(
+        access_type="offline",
+        prompt="consent",
+        state=state,
+        include_granted_scopes="true",
+    )
+    return {"authorization_url": authorization_url}
+
+
+@app.get("/auth/google/callback")
+async def google_oauth_callback(
+    code: str = Query(""),
+    state: str = Query(""),
+    error: Optional[str] = Query(default=None),
+):
+    """OAuth redirect target (no Bearer). Writes token.json for Calendar + Tasks (same as Telegram)."""
+    if error:
+        raise HTTPException(status_code=400, detail={"error": error})
+    if not code or not state:
+        raise HTTPException(status_code=400, detail={"error": "Missing code or state"})
+    ser = _oauth_state_serializer()
+    if ser is None:
+        raise HTTPException(status_code=503, detail={"error": "SESSION_SECRET not configured"})
+    try:
+        data = ser.loads(state, max_age=600)
+        if data.get("sub") != "mason":
+            raise ValueError("bad sub")
+    except (BadSignature, SignatureExpired, ValueError, Exception):
+        raise HTTPException(status_code=400, detail={"error": "Invalid or expired state"})
+    flow = _google_flow()
+    if flow is None:
+        raise HTTPException(status_code=503, detail={"error": "Google OAuth not configured"})
+    try:
+        flow.fetch_token(code=code)
+    except Exception as e:
+        api_logger.exception("google oauth fetch_token failed")
+        raise HTTPException(status_code=400, detail={"error": str(e)}) from e
+    creds = flow.credentials
+    with open(_token_path_write(), "w", encoding="utf-8") as f:
+        f.write(creds.to_json())
+    api_logger.info("Google OAuth token stored (Connect Google)")
+    return RedirectResponse(url=_google_success_redirect_url())
 
 
 @app.get("/health")

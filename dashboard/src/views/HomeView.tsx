@@ -5,6 +5,7 @@ import { fetchTodaysChores } from '../api/chores'
 import { fetchHabits } from '../api/habits'
 import { isApiConfigured } from '../config/apiEnv'
 import { fetchTasksDueToday, fetchTasksDueTomorrow } from '../api/tasks'
+import { ConnectGoogleBanner } from '../components/ConnectGoogleBanner'
 import { AllDayBanner } from '../components/command-center/AllDayBanner'
 import { DayHeader } from '../components/command-center/DayHeader'
 import { MorningBriefCard } from '../components/command-center/MorningBriefCard'
@@ -63,6 +64,15 @@ export function HomeView() {
 
   const needsApiEnv = !isApiConfigured()
   const [loading, setLoading] = useState(() => isApiConfigured())
+
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search)
+    if (p.get('google_connected') === '1') {
+      p.delete('google_connected')
+      const next = `${window.location.pathname}${p.toString() ? `?${p.toString()}` : ''}${window.location.hash}`
+      window.history.replaceState({}, '', next)
+    }
+  }, [])
   const [errCalendar, setErrCalendar] = useState<string | null>(null)
   const [errChores, setErrChores] = useState<string | null>(null)
   const [errHabits, setErrHabits] = useState<string | null>(null)
@@ -263,6 +273,9 @@ export function HomeView() {
       ) : (
       <div className="flex min-h-0 flex-1 flex-col gap-4 px-0 pb-6 pt-3 lg:grid lg:grid-cols-5 lg:gap-6 lg:px-8 lg:pb-10">
         <div className="min-h-0 space-y-4 lg:col-span-3 lg:flex lg:flex-col lg:gap-4">
+          <div className="px-4 lg:px-0">
+            <ConnectGoogleBanner />
+          </div>
           <div className="px-4 lg:hidden">
             {loading ? (
               <SectionSkeleton rows={4} />
