@@ -10,7 +10,7 @@ Follow in order. Your droplet user is `mason`, project path `/home/mason/agent`,
 |--|----------------|--------------------------------|
 | **Goal** | Fast UI iteration | Same app for mobile/desktop over HTTPS |
 | **Run** | `cd dashboard` → `npm run dev` (Vite opens the browser) | Build + deploy only when **you** trigger it (not on every `git push`) |
-| **API URL** | `dashboard/.env.development` or `.env.local` → e.g. `http://127.0.0.1:8000` or your tunnel | Set as **`VITE_API_URL`** in **GitHub Actions secrets** (must be **HTTPS** so the HTTPS Page can call it) |
+| **API URL** | `dashboard/.env.development` or `.env.local` — use **HTTPS URL to the droplet** (or tunnel) so Calendar/Tasks use server-side `token.json` | Set as **`VITE_API_URL`** in **GitHub Actions secrets** (must be **HTTPS** so the HTTPS Page can call it) |
 | **Password** | Type the same value as **`DASHBOARD_PASSWORD`** on the server — **never** commit it or put it in `VITE_*` | Same: server-only secret; static JS does not contain the password |
 | **Data access** | After login, API returns data | Same: only **logged-in** clients get data; the HTML/JS bundle is still publicly downloadable (normal for SPAs) |
 
@@ -46,6 +46,39 @@ Edit `/home/mason/agent/.env` (same file the Telegram bot and `mason-api.service
 **Do not** put `SESSION_SECRET` or `DASHBOARD_PASSWORD` in the GitHub repo or in the frontend.
 
 See `api.env.example` in the repo root for a paste-friendly template.
+
+---
+
+## Phase 2b — Google Calendar & Tasks on the droplet (recommended)
+
+The FastAPI app uses the **same** Google OAuth files and code as the Telegram bot (`core/google_auth.py`, `agents/calendar_agent.py`, `agents/tasks_agent.py`). **No second Google project or token** is required if Calendar/Tasks already work in Telegram.
+
+**Where files must live**
+
+| File | Path on droplet | Notes |
+|------|------------------|--------|
+| `credentials.json` | `/home/mason/agent/credentials.json` | OAuth client (Desktop) from Google Cloud — **gitignored** |
+| `token.json` | `/home/mason/agent/token.json` | Refreshed access token — **gitignored**, same file the bot uses |
+
+`mason-api.service` sets **`WorkingDirectory=/home/mason/agent`**, so `api.py` resolves these paths the same way as `mason-agent.service` for Telegram.
+
+**Quick checks (SSH on the droplet)**
+
+```bash
+cd /home/mason/agent
+test -f credentials.json && echo "credentials.json OK"
+test -f token.json && echo "token.json OK"
+sudo systemctl status mason-api --no-pager
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8000/health
+```
+
+**If `/calendar/*` or `/tasks/*` return 500 while `/health` is 200**
+
+- Confirm Telegram can still use Calendar/Tasks (rules out a revoked Google token).
+- Inspect **`logs/api.log`** on the droplet for Google API errors.
+- Ensure **Google Calendar API** and **Google Tasks API** are enabled in the same Cloud project as your OAuth client.
+
+**Laptop dev:** To hit the **droplet API** (so Google runs on the server), set **`dashboard/.env.local`** to your **HTTPS** API URL (ngrok or reverse proxy), not `127.0.0.1:8000`. Copying `token.json` to your PC is optional and duplicates secrets — prefer calling the droplet.
 
 ---
 
@@ -101,8 +134,9 @@ The second command should return JSON with `access_token`.
 
 1. `cd dashboard`
 2. Ensure `VITE_API_URL` points at your API (in dev, `.env.development` is committed for convenience; override in `.env.local` if needed).  
-   - HTTP droplet IP: `http://YOUR_IP:8000` — OK for **local** dev from `http://localhost`.  
-   - Production: **`https://`** your API hostname once TLS is set up.
+   - **Google Calendar/Tasks data** — point at the **droplet** (or **HTTPS** tunnel to it): create **`.env.local`** with `VITE_API_URL=https://YOUR_NGROK_OR_HTTPS_HOST` so the API (and Google tokens) stay on the server.  
+   - Local API only (`http://127.0.0.1:8000`) — use only if **`credentials.json`** and **`token.json`** exist **on that machine** too.  
+   - Production (GitHub Pages): **`https://`** API URL in Actions secrets (see Phase 7).
 
 3. `npm install` then `npm run dev`
 
@@ -152,3 +186,4 @@ Pushing to `main` **does not** deploy the site. You choose when production updat
 | Mixed content blocked | API must be HTTPS when the site is HTTPS |
 | 401 on every request | Log in again; token in `sessionStorage`; or set `VITE_API_KEY` for dev scripts |
 | 503 on `/auth/login` | `SESSION_SECRET` and `DASHBOARD_PASSWORD` set in droplet `.env` |
+| 500 on `/calendar/*` or `/tasks/*` | `token.json` / `credentials.json` in `/home/mason/agent`, Google APIs enabled, token not revoked; see **Phase 2b** |
