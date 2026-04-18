@@ -80,19 +80,30 @@ curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8000/health
 
 **If the API returns `invalid_grant` / “Token has been expired or revoked”**
 
-That message is from **Google OAuth**, not the dashboard password. The refresh token in **`token.json`** is no longer valid (revoked in Google Account, app unused too long, or password changed). Fix:
+That is **Google OAuth** (not the dashboard password). Replace **`token.json` on the droplet** with a fresh token — **no manual scp** required if you use the flow below.
 
-1. On your **laptop** (with a browser), in a clone of this repo that has **`credentials.json`** in the repo root, run:  
-   `python scripts/google_reauth.py`  
-   Complete the browser sign-in; this writes a new **`token.json`** with Calendar + Tasks scopes.
-2. Copy it to the droplet:  
-   `scp token.json mason@YOUR_DROPLET:/home/mason/agent/`  
-   (Back up the old `token.json` on the droplet first if you want.)
-3. `sudo systemctl restart mason-api` (and `mason-agent` if the bot should pick it up too).
+**Preferred — OAuth on the droplet via SSH tunnel (Windows)**
 
-You cannot run the browser OAuth step on a **headless** droplet; always re-auth on a desktop machine, then upload **`token.json`**.
+1. `git pull` on the droplet so **`scripts/google_reauth.py`** and **`scripts/droplet-google-oauth.ps1`** exist.
+2. On your **PC** (PowerShell, repo root), with SSH working to the droplet:
 
-**Laptop dev:** To hit the **droplet API** (so Google runs on the server), set **`dashboard/.env.local`** to your **HTTPS** API URL (ngrok or reverse proxy), not `127.0.0.1:8000`. Copying `token.json` to your PC is optional and duplicates secrets — prefer calling the droplet.
+   ```powershell
+   .\scripts\droplet-google-oauth.ps1 -DropletHost YOUR_DROPLET_IP
+   ```
+
+   This starts a tunnel **localhost:8765 → droplet:8765**, runs **`python scripts/google_reauth.py --droplet`** **on the server**, and restarts **`mason-api`** / **`mason-agent`**. When the script prints a Google URL, open it in your **PC browser** and sign in; Google redirects to **http://localhost:8765/**, which the tunnel forwards to the droplet so **`token.json`** is written **on the server**.
+
+**Manual (two terminals on PC)**
+
+1. Terminal A: `ssh -N -L 8765:127.0.0.1:8765 mason@YOUR_DROPLET`
+2. Terminal B: `ssh mason@YOUR_DROPLET` then  
+   `cd /home/mason/agent && source venv/bin/activate && python scripts/google_reauth.py --droplet`  
+   Open the printed URL in your PC browser. Then:  
+   `sudo systemctl restart mason-api mason-agent`
+
+**Laptop-only (token file stays on PC)** — run **`python scripts/google_reauth.py`** (no `--droplet`); still need **`scp token.json`** to the droplet if the API runs there.
+
+**Laptop dev:** Point **`dashboard/.env.local`** at your **HTTPS** droplet/ngrok API so Calendar/Tasks use server-side **`token.json`**.
 
 ---
 
