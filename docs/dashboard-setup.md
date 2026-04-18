@@ -119,7 +119,7 @@ Optional: set `VITE_API_KEY` in `.env.local` only for local automation; the UI u
 ## Phase 8 — After it works
 
 - Rotate `DASHBOARD_PASSWORD` and `SESSION_SECRET` if they were ever exposed.
-- Use `deploy.sh` on the droplet after `git pull` to restart `mason-agent` and `mason-api`.
+- Use `./deploy.sh` on the droplet after `git pull`. It runs `scripts/merge_github_pages_cors.py`, which adds the origin from `scripts/github-pages-origin.txt` to `DASHBOARD_CORS_ORIGINS` in `.env` (edit that file if you fork or change your Pages URL), then restarts `mason-agent` and `mason-api`.
 - Next: module-by-module features (chores, meal plan, etc.) on top of the same API pattern.
 
 ---
@@ -128,7 +128,8 @@ Optional: set `VITE_API_KEY` in `.env.local` only for local automation; the UI u
 
 | Symptom | Check |
 |---------|--------|
-| CORS error in browser | `DASHBOARD_CORS_ORIGINS` includes your exact site origin; restart `mason-api` |
+| CORS error in browser | `DASHBOARD_CORS_ORIGINS` includes your exact site origin (e.g. `https://YOURUSER.github.io`); restart `mason-api` |
+| CORS only when using **ngrok** free URL | ngrok’s warning page has no CORS headers. The dashboard sends `ngrok-skip-browser-warning` when `VITE_API_URL` is an ngrok host. You still must list the Pages origin in `DASHBOARD_CORS_ORIGINS`. |
 | Mixed content blocked | API must be HTTPS when the site is HTTPS |
 | 401 on every request | Log in again; token in `sessionStorage`; or set `VITE_API_KEY` for dev scripts |
 | 503 on `/auth/login` | `SESSION_SECRET` and `DASHBOARD_PASSWORD` set in droplet `.env` |

@@ -1,0 +1,3 @@
+# One origin per line; first non-comment line is merged into DASHBOARD_CORS_ORIGINS on deploy.
+# Edit if you fork the repo or use a custom Pages domain.
+https://winningfungus48.github.io

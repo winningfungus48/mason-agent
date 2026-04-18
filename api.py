@@ -141,7 +141,14 @@ app.add_middleware(
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=False,
     allow_methods=["*"],
-    allow_headers=["*", "Authorization", "X-API-Key", "Content-Type"],
+    allow_headers=[
+        "*",
+        "Authorization",
+        "X-API-Key",
+        "Content-Type",
+        # Browsers send this on preflight when the dashboard adds ngrok's skip-interstitial header.
+        "ngrok-skip-browser-warning",
+    ],
 )
 
 

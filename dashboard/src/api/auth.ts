@@ -1,4 +1,4 @@
-import { apiBase } from '../config/apiEnv'
+import { apiBase, ngrokSkipHeaders } from '../config/apiEnv'
 
 const TOKEN_KEY = 'mason_access_token'
 
@@ -19,7 +19,7 @@ export async function loginWithPassword(password: string): Promise<void> {
   if (!base) throw new Error('VITE_API_URL is not set')
   const res = await fetch(`${base}/auth/login`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...ngrokSkipHeaders() },
     body: JSON.stringify({ password }),
   })
   const text = await res.text()
@@ -42,8 +42,8 @@ export async function fetchAuthMe(): Promise<{ authenticated: boolean; via?: str
   const base = apiBase()
   if (!base) return { authenticated: false }
   const token = getAccessToken()
-  const headers: HeadersInit = {}
-  if (token) headers.Authorization = `Bearer ${token}`
+  const headers = new Headers({ ...ngrokSkipHeaders() })
+  if (token) headers.set('Authorization', `Bearer ${token}`)
   const res = await fetch(`${base}/auth/me`, { headers })
   const data = (await res.json()) as { authenticated: boolean; via?: string }
   return data
@@ -56,7 +56,10 @@ export async function logoutRemote() {
   try {
     await fetch(`${base}/auth/logout`, {
       method: 'POST',
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      headers: {
+        ...ngrokSkipHeaders(),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
     })
   } catch {
     /* ignore */

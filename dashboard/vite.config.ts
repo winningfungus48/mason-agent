@@ -9,6 +9,8 @@ export default defineConfig({
     host: true,
     port: 5173,
     strictPort: false,
+    // Open the app in the default browser as soon as the dev server is ready (no manual URL).
+    open: true,
   },
   preview: {
     host: true,

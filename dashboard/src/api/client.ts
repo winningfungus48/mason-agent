@@ -3,7 +3,7 @@
  * Set `VITE_API_URL` in `.env.development` / `.env.local`.
  * Auth: Bearer token from POST /auth/login (sessionStorage), or optional `VITE_API_KEY`.
  */
-import { apiBase } from '../config/apiEnv'
+import { apiBase, ngrokSkipHeaders } from '../config/apiEnv'
 import { getAccessToken } from './auth'
 
 export class ApiError extends Error {
@@ -38,6 +38,9 @@ export async function apiJson<T>(
   }
   const url = `${base}${path.startsWith('/') ? path : `/${path}`}`
   const headers = new Headers(init.headers)
+  for (const [k, v] of Object.entries(ngrokSkipHeaders())) {
+    if (!headers.has(k)) headers.set(k, v)
+  }
   if (!headers.has('Content-Type') && init.body != null) {
     headers.set('Content-Type', 'application/json')
   }
