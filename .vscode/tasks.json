@@ -20,9 +20,6 @@
         "reveal": "always",
         "panel": "shared",
         "focus": false
-      },
-      "runOptions": {
-        "runOn": "folderOpen"
       }
     }
   ]

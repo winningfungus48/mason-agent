@@ -24,9 +24,11 @@ npm run build
 
 Output: `dist/`. Preview with `npm run preview`.
 
-## GitHub Pages
+## GitHub Pages (production)
 
-Set `base` in `vite.config.ts` to your repo path if needed (e.g. `/mason-agent/`). The API must list your Pages **origin** in `DASHBOARD_CORS_ORIGINS`. HTTPS Pages requires an **HTTPS** API URL in `VITE_API_URL` at build time.
+Deploys are **manual** — pushing to `main` does not update the live site. After secrets and CORS are set up, run from repo root: **`scripts/deploy-github-pages.ps1`** (Windows) or **`scripts/deploy-github-pages.sh`** (macOS/Linux), or **Actions → Run workflow**. See [`../docs/dashboard-setup.md`](../docs/dashboard-setup.md) Phase 7.
+
+The workflow builds with `--base=/mason-agent/`. **`VITE_API_URL`** must be an **HTTPS** API URL via GitHub Actions secrets. The dashboard password stays **`DASHBOARD_PASSWORD`** on the server only — never in `VITE_*` or the repo.
 
 ## Architecture
 

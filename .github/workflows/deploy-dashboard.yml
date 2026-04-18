@@ -1,10 +1,8 @@
+# Publishes the dashboard to GitHub Pages. Does NOT run on push — only when you explicitly trigger it
+# (repo root: scripts/deploy-github-pages.ps1 or .sh, or GitHub → Actions → Run workflow).
 name: Deploy Dashboard to GitHub Pages
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'dashboard/**'
   workflow_dispatch:
 
 permissions:

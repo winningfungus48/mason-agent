@@ -4,6 +4,16 @@ Follow in order. Your droplet user is `mason`, project path `/home/mason/agent`,
 
 **New to SSH?** Read **[ssh-beginner.md](ssh-beginner.md)** first (open terminal, one `ssh` command, optional shortcut).
 
+### Development vs production (summary)
+
+| | **Local dev** | **Production (GitHub Pages)** |
+|--|----------------|--------------------------------|
+| **Goal** | Fast UI iteration | Same app for mobile/desktop over HTTPS |
+| **Run** | `cd dashboard` → `npm run dev` (Vite opens the browser) | Build + deploy only when **you** trigger it (not on every `git push`) |
+| **API URL** | `dashboard/.env.development` or `.env.local` → e.g. `http://127.0.0.1:8000` or your tunnel | Set as **`VITE_API_URL`** in **GitHub Actions secrets** (must be **HTTPS** so the HTTPS Page can call it) |
+| **Password** | Type the same value as **`DASHBOARD_PASSWORD`** on the server — **never** commit it or put it in `VITE_*` | Same: server-only secret; static JS does not contain the password |
+| **Data access** | After login, API returns data | Same: only **logged-in** clients get data; the HTML/JS bundle is still publicly downloadable (normal for SPAs) |
+
 ---
 
 ## Phase 1 — Droplet: Python dependencies
@@ -102,17 +112,26 @@ Optional: set `VITE_API_KEY` in `.env.local` only for local automation; the UI u
 
 ---
 
-## Phase 7 — GitHub Pages build
+## Phase 7 — Publish the dashboard to GitHub Pages (manual)
 
-1. In `dashboard/vite.config.ts`, set `base` to your Pages path (e.g. `/mason-agent/` for project Pages).
+Pushing to `main` **does not** deploy the site. You choose when production updates.
 
-2. Build: `npm run build`
+1. **One-time — GitHub repository secrets** (Settings → Secrets and variables → Actions):  
+   - **`VITE_API_URL`** — production API base URL, **HTTPS**, **no trailing slash** (e.g. `https://your-api.example.com` or your **HTTPS** ngrok URL). This is baked into the built JS; it is **not** a password.  
+   - **`VITE_API_KEY`** — optional; only if you use `DASHBOARD_API_KEY` for automation. Omit unless you need it.
 
-3. Deploy `dashboard/dist/` (Actions, `gh-pages` branch, or “Deploy from branch”).
+2. **CORS on the droplet** — `DASHBOARD_CORS_ORIGINS` must include `https://YOURUSER.github.io`. Running **`./deploy.sh`** on the droplet (after `git pull`) runs `scripts/merge_github_pages_cors.py` to merge the origin from `scripts/github-pages-origin.txt` into `.env`, then restarts services.
 
-4. Add the **exact** Pages origin to `DASHBOARD_CORS_ORIGINS` on the droplet and restart `mason-api`.
+3. **Deploy command** (after your changes are on `main`): from the repo root, run **one** of:  
+   - **Windows (PowerShell):** `.\scripts\deploy-github-pages.ps1`  
+   - **macOS / Linux / Git Bash:** `./scripts/deploy-github-pages.sh`  
+   - Or: GitHub → **Actions** → **Deploy Dashboard to GitHub Pages** → **Run workflow**
 
-5. Ensure the API URL in the **built** site uses **HTTPS** if the Page is HTTPS (set `VITE_API_URL` at build time in GitHub Actions secrets / env to your HTTPS API URL).
+   Requires [GitHub CLI](https://cli.github.com/) (`gh`) installed and `gh auth login` for the scripts.
+
+4. Watch the workflow finish, then open your Pages URL (e.g. `https://YOURUSER.github.io/mason-agent/`).
+
+**Local production-like build (optional):** `cd dashboard` → `npm run build -- --base=/mason-agent/` with `VITE_API_URL` set in the environment — same as CI.
 
 ---
 
