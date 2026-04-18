@@ -1,6 +1,8 @@
 # Chief of Staff dashboard
 
-Static React dashboard for the personal AI agent. Data is mocked in `src/constants/mockData.ts`; each feature area loads through `src/api/*.ts` so you can swap in real `fetch` calls when the FastAPI layer on the droplet is ready.
+Vite + React + Tailwind. Data loads from the FastAPI app on your droplet (`api.py`) via `src/api/*.ts`.
+
+**Full setup (droplet env, CORS, HTTPS, GitHub Pages):** see [`../docs/dashboard-setup.md`](../docs/dashboard-setup.md).
 
 ## Local development
 
@@ -10,21 +12,9 @@ npm install
 npm run dev
 ```
 
-Open the URL Vite prints (usually `http://localhost:5173`).
+Configure **`VITE_API_URL`** (see `.env.development` or create `.env.local` to override). Sign in with the password from **`DASHBOARD_PASSWORD`** on the server — not stored in the frontend bundle.
 
-## Password gate
-
-The unlock password is hardcoded at the top of `src/components/PasswordGate.tsx` (`DASHBOARD_PASSWORD`). Change it there. Successful login is stored in `sessionStorage` so refreshes stay signed in until the tab session ends.
-
-## Environment (future API)
-
-Create `.env.local` (gitignored) when the backend exists:
-
-```bash
-VITE_API_BASE_URL=https://104.131.39.150:8443
-```
-
-`src/constants/apiConfig.ts` exposes `API_BASE_URL` from `import.meta.env.VITE_API_BASE_URL`. Individual `src/api/*` modules can use it for `fetch` without touching UI components.
+Optional: `VITE_API_KEY` in `.env.local` matches `DASHBOARD_API_KEY` on the server for local scripting only.
 
 ## Production build
 
@@ -32,26 +22,13 @@ VITE_API_BASE_URL=https://104.131.39.150:8443
 npm run build
 ```
 
-Output is in `dist/`. Preview locally with `npm run preview`.
+Output: `dist/`. Preview with `npm run preview`.
 
-## GitHub Pages (or static hosting)
+## GitHub Pages
 
-1. Set the Vite `base` option to your repo path if the site is not at the domain root, e.g. in `vite.config.ts`:
+Set `base` in `vite.config.ts` to your repo path if needed (e.g. `/mason-agent/`). The API must list your Pages **origin** in `DASHBOARD_CORS_ORIGINS`. HTTPS Pages requires an **HTTPS** API URL in `VITE_API_URL` at build time.
 
-   ```ts
-   export default defineConfig({
-     base: '/mason-agent/',
-     plugins: [react(), tailwindcss()],
-   })
-   ```
-
-   Use `/` if you use a custom domain or user/org site at root.
-
-2. Build and deploy the `dist/` folder (GitHub Actions, `gh-pages` branch, or any static host).
-
-3. CORS: the FastAPI app on the droplet must allow your static origin when you switch from mocks to real requests.
-
-## Architecture notes
+## Architecture
 
 - **Frontend:** Vite + React + Tailwind CSS v4 (`@tailwindcss/vite`).
-- **Backend (later):** FastAPI on the droplet, importing existing `agents/` and `core/` code; dashboard calls `https://<host>:<port>/...` (TLS and port are your ops choice; the skeleton uses env-based base URL only).
+- **Backend:** FastAPI in repo root `api.py`, same droplet as the Telegram agent.

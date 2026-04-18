@@ -2,6 +2,11 @@
 FastAPI dashboard API for Mason's agent.
 Imports existing agents — no duplicated business logic.
 Run: uvicorn api:app --host 0.0.0.0 --port 8000
+
+Auth (no third-party IdP):
+  - POST /auth/login with { "password": "<DASHBOARD_PASSWORD>" } → Bearer token (signed, itsdangerous).
+  - Protected routes: Authorization: Bearer <token> OR X-API-Key: <DASHBOARD_API_KEY> (optional automation).
+  - Env: SESSION_SECRET, DASHBOARD_PASSWORD, DASHBOARD_CORS_ORIGINS (comma-separated). Optional: DASHBOARD_API_KEY.
 """
 
 from __future__ import annotations
@@ -10,6 +15,7 @@ import asyncio
 import logging
 import os
 import re
+import secrets
 import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -23,6 +29,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from pydantic import BaseModel, Field
 
 load_dotenv()
@@ -54,7 +61,63 @@ if not api_logger.handlers:
     api_logger.addHandler(_fh)
 
 API_KEY = os.getenv("DASHBOARD_API_KEY", "")
+# Signed Bearer tokens for the dashboard (itsdangerous). Required for password login.
+SESSION_SECRET = os.getenv("SESSION_SECRET", "")
+# Plain-text dashboard password (keep long & random). Validated only on the server.
+DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "")
+TOKEN_MAX_AGE_SECONDS = int(os.getenv("DASHBOARD_TOKEN_MAX_AGE", str(14 * 24 * 3600)))
+# Comma-separated origins for browser clients (GitHub Pages + local Vite). Tighten for production.
+_cors_raw = os.getenv(
+    "DASHBOARD_CORS_ORIGINS",
+    "http://localhost:5173,http://localhost:5174,http://localhost:5175,"
+    "http://127.0.0.1:5173,http://127.0.0.1:5174",
+)
+ALLOWED_ORIGINS = [o.strip().rstrip("/") for o in _cors_raw.split(",") if o.strip()]
+
 BRIEF_CACHE_FILE = os.path.join(DOCUMENTS_DIR, "last_brief.txt")
+
+_cached_serializer: Optional[URLSafeTimedSerializer] = None
+
+
+def _serializer() -> Optional[URLSafeTimedSerializer]:
+    global _cached_serializer
+    if not SESSION_SECRET:
+        return None
+    if _cached_serializer is None:
+        _cached_serializer = URLSafeTimedSerializer(SESSION_SECRET, salt="mason-dashboard-v1")
+    return _cached_serializer
+
+
+def _api_key_matches(provided: Optional[str]) -> bool:
+    if not API_KEY or not provided:
+        return False
+    try:
+        return secrets.compare_digest(provided.encode("utf-8"), API_KEY.encode("utf-8"))
+    except ValueError:
+        return False
+
+
+def _password_matches(pw: str) -> bool:
+    if not DASHBOARD_PASSWORD:
+        return False
+    try:
+        return secrets.compare_digest(pw.encode("utf-8"), DASHBOARD_PASSWORD.encode("utf-8"))
+    except ValueError:
+        return False
+
+
+def _bearer_token_valid(authorization: Optional[str]) -> bool:
+    if not authorization or not authorization.startswith("Bearer "):
+        return False
+    token = authorization[7:].strip()
+    ser = _serializer()
+    if not token or ser is None:
+        return False
+    try:
+        data = ser.loads(token, max_age=TOKEN_MAX_AGE_SECONDS)
+        return data.get("sub") == "mason"
+    except (BadSignature, SignatureExpired, Exception):
+        return False
 
 # Google Calendar default color IDs → hex (approximate)
 GCAL_COLOR_HEX = {
@@ -75,10 +138,10 @@ app = FastAPI(title="Mason Agent API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=False,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*", "Authorization", "X-API-Key", "Content-Type"],
 )
 
 
@@ -106,16 +169,23 @@ async def log_requests(request: Request, call_next):
     return response
 
 
-async def verify_api_key(x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
-    if not API_KEY:
-        api_logger.warning("DASHBOARD_API_KEY not set — refusing authenticated routes")
-        raise HTTPException(status_code=503, detail={"error": "API key not configured on server"})
-    if not x_api_key or x_api_key != API_KEY:
-        raise HTTPException(status_code=401, detail={"error": "Invalid or missing API key"})
-    return True
+async def verify_auth(
+    authorization: Optional[str] = Header(None),
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
+):
+    """
+    Accepts either:
+    - Authorization: Bearer <signed token> from POST /auth/login, or
+    - X-API-Key: <DASHBOARD_API_KEY> for scripts / monitoring (optional).
+    """
+    if _api_key_matches(x_api_key):
+        return True
+    if _bearer_token_valid(authorization):
+        return True
+    raise HTTPException(status_code=401, detail={"error": "Not authenticated"})
 
 
-Auth = Depends(verify_api_key)
+Auth = Depends(verify_auth)
 
 
 # ── Pydantic models ───────────────────────────────────────────────────────
@@ -155,6 +225,10 @@ class TaskAddBody(BaseModel):
 class ChatBody(BaseModel):
     message: str
     history: Optional[list[dict[str, Any]]] = None
+
+
+class LoginBody(BaseModel):
+    password: str = Field(..., min_length=1)
 
 
 # ── Helpers (sync; run via run_in_threadpool) ─────────────────────────────
@@ -620,6 +694,47 @@ def _regenerate_brief_sync() -> None:
 
 
 # ── Routes ────────────────────────────────────────────────────────────────
+
+
+@app.post("/auth/login")
+async def auth_login(body: LoginBody):
+    if not DASHBOARD_PASSWORD:
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "DASHBOARD_PASSWORD not configured on server"},
+        )
+    ser = _serializer()
+    if ser is None:
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "SESSION_SECRET not configured on server"},
+        )
+    if not _password_matches(body.password):
+        raise HTTPException(status_code=401, detail={"error": "Invalid password"})
+    token = ser.dumps({"sub": "mason"})
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "expires_in": TOKEN_MAX_AGE_SECONDS,
+    }
+
+
+@app.post("/auth/logout")
+async def auth_logout():
+    """Stateless tokens: client discards the token; this endpoint is a no-op for API symmetry."""
+    return {"success": True}
+
+
+@app.get("/auth/me")
+async def auth_me(
+    authorization: Optional[str] = Header(None),
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
+):
+    if _api_key_matches(x_api_key):
+        return {"authenticated": True, "via": "api_key"}
+    if _bearer_token_valid(authorization):
+        return {"authenticated": True, "via": "bearer"}
+    return {"authenticated": False}
 
 
 @app.get("/health")

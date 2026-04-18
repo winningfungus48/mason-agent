@@ -3,6 +3,7 @@ import { fetchCommandBriefCard } from '../api/briefing'
 import { fetchTodayCalendar, fetchTomorrowPreviewBlock } from '../api/calendar'
 import { fetchTodaysChores } from '../api/chores'
 import { fetchHabits } from '../api/habits'
+import { isApiConfigured } from '../config/apiEnv'
 import { fetchTasksDueToday, fetchTasksDueTomorrow } from '../api/tasks'
 import { AllDayBanner } from '../components/command-center/AllDayBanner'
 import { DayHeader } from '../components/command-center/DayHeader'
@@ -60,7 +61,8 @@ export function HomeView() {
     Pick<TaskItem, 'id' | 'title' | 'priority'>[]
   >([])
 
-  const [loading, setLoading] = useState(true)
+  const needsApiEnv = !isApiConfigured()
+  const [loading, setLoading] = useState(() => isApiConfigured())
   const [errCalendar, setErrCalendar] = useState<string | null>(null)
   const [errChores, setErrChores] = useState<string | null>(null)
   const [errHabits, setErrHabits] = useState<string | null>(null)
@@ -74,77 +76,84 @@ export function HomeView() {
   const [taskDoneIds, setTaskDoneIds] = useState<Set<string>>(() => new Set())
 
   useEffect(() => {
-    let cancelled = false
-
-    async function loadCommandCenter() {
-      setLoading(true)
-      const results = await Promise.allSettled([
-        fetchTodayCalendar(),
-        fetchTodaysChores(),
-        fetchHabits(),
-        fetchTasksDueToday(),
-        fetchCommandBriefCard(),
-        fetchTomorrowPreviewBlock(),
-        fetchTasksDueTomorrow(),
-      ])
-      if (cancelled) return
-
-      const [rCal, rChores, rHabits, rTasks, rBrief, rTom, rTomTasks] = results
-
-      if (rCal.status === 'fulfilled') {
-        setEvents(sortEventsByTime(rCal.value.events))
-        setAllDayEvents(rCal.value.allDayEvents)
-        setErrCalendar(null)
-      } else {
-        setErrCalendar(rCal.reason instanceof Error ? rCal.reason.message : 'Failed')
-      }
-
-      if (rChores.status === 'fulfilled') {
-        setChores(rChores.value)
-        setErrChores(null)
-      } else {
-        setErrChores(rChores.reason instanceof Error ? rChores.reason.message : 'Failed')
-      }
-
-      if (rHabits.status === 'fulfilled') {
-        setHabits(rHabits.value)
-        setErrHabits(null)
-      } else {
-        setErrHabits(rHabits.reason instanceof Error ? rHabits.reason.message : 'Failed')
-      }
-
-      if (rTasks.status === 'fulfilled') {
-        setAllTasks(rTasks.value)
-        setErrTasks(null)
-      } else {
-        setErrTasks(rTasks.reason instanceof Error ? rTasks.reason.message : 'Failed')
-      }
-
-      if (rBrief.status === 'fulfilled') {
-        setBrief(rBrief.value)
-        setErrBrief(rBrief.value ? null : 'No brief cached yet')
-      } else {
-        setBrief(null)
-        setErrBrief(rBrief.reason instanceof Error ? rBrief.reason.message : 'Failed')
-      }
-
-      if (rTom.status === 'fulfilled') {
-        setTomorrowLabel(rTom.value.dateLabel)
-        setTomorrowEvents(rTom.value.events)
-        setErrTomorrow(null)
-      } else {
-        setErrTomorrow(rTom.reason instanceof Error ? rTom.reason.message : 'Failed')
-      }
-
-      if (rTomTasks.status === 'fulfilled') {
-        setTomorrowTasks(rTomTasks.value)
-      }
-
+    if (!isApiConfigured()) {
       setLoading(false)
+      return
     }
 
-    loadCommandCenter()
-    const id = window.setInterval(loadCommandCenter, REFRESH_MS)
+    let cancelled = false
+
+    async function loadCommandCenter(showSkeleton: boolean) {
+      if (showSkeleton) setLoading(true)
+      try {
+        const results = await Promise.allSettled([
+          fetchTodayCalendar(),
+          fetchTodaysChores(),
+          fetchHabits(),
+          fetchTasksDueToday(),
+          fetchCommandBriefCard(),
+          fetchTomorrowPreviewBlock(),
+          fetchTasksDueTomorrow(),
+        ])
+        if (cancelled) return
+
+        const [rCal, rChores, rHabits, rTasks, rBrief, rTom, rTomTasks] = results
+
+        if (rCal.status === 'fulfilled') {
+          setEvents(sortEventsByTime(rCal.value.events))
+          setAllDayEvents(rCal.value.allDayEvents)
+          setErrCalendar(null)
+        } else {
+          setErrCalendar(rCal.reason instanceof Error ? rCal.reason.message : 'Failed')
+        }
+
+        if (rChores.status === 'fulfilled') {
+          setChores(rChores.value)
+          setErrChores(null)
+        } else {
+          setErrChores(rChores.reason instanceof Error ? rChores.reason.message : 'Failed')
+        }
+
+        if (rHabits.status === 'fulfilled') {
+          setHabits(rHabits.value)
+          setErrHabits(null)
+        } else {
+          setErrHabits(rHabits.reason instanceof Error ? rHabits.reason.message : 'Failed')
+        }
+
+        if (rTasks.status === 'fulfilled') {
+          setAllTasks(rTasks.value)
+          setErrTasks(null)
+        } else {
+          setErrTasks(rTasks.reason instanceof Error ? rTasks.reason.message : 'Failed')
+        }
+
+        if (rBrief.status === 'fulfilled') {
+          setBrief(rBrief.value)
+          setErrBrief(rBrief.value ? null : 'No brief cached yet')
+        } else {
+          setBrief(null)
+          setErrBrief(rBrief.reason instanceof Error ? rBrief.reason.message : 'Failed')
+        }
+
+        if (rTom.status === 'fulfilled') {
+          setTomorrowLabel(rTom.value.dateLabel)
+          setTomorrowEvents(rTom.value.events)
+          setErrTomorrow(null)
+        } else {
+          setErrTomorrow(rTom.reason instanceof Error ? rTom.reason.message : 'Failed')
+        }
+
+        if (rTomTasks.status === 'fulfilled') {
+          setTomorrowTasks(rTomTasks.value)
+        }
+      } finally {
+        if (!cancelled && showSkeleton) setLoading(false)
+      }
+    }
+
+    loadCommandCenter(true)
+    const id = window.setInterval(() => loadCommandCenter(false), REFRESH_MS)
     return () => {
       cancelled = true
       window.clearInterval(id)
@@ -230,6 +239,28 @@ export function HomeView() {
         />
       </div>
 
+      {needsApiEnv ? (
+        <div className="px-4 py-6 lg:px-8">
+          <div className="rounded-2xl border border-amber-500/25 bg-[#12151c] px-4 py-5 text-sm text-zinc-300">
+            <p className="font-semibold text-amber-200/95">Connect the dashboard to your API</p>
+            <p className="mt-2 leading-relaxed text-zinc-400">
+              Vite only reads env vars when the dev server starts. Create{' '}
+              <code className="rounded bg-[#0c0e12] px-1.5 py-0.5 text-xs text-zinc-300">dashboard/.env.local</code>{' '}
+              with:
+            </p>
+            <pre className="mt-3 overflow-x-auto rounded-xl border border-[#1f2430] bg-[#0c0e12] p-3 text-left text-xs text-zinc-400">
+              {`VITE_API_URL=http://YOUR_DROPLET_IP:8000`}
+            </pre>
+            <p className="mt-3 text-xs text-zinc-500">
+              Then stop and run <code className="text-zinc-600">npm run dev</code> again. Sign in with the password
+              from <code className="text-zinc-600">DASHBOARD_PASSWORD</code> on the server (not stored in the
+              frontend). For GitHub Pages, add your HTTPS site origin to{' '}
+              <code className="text-zinc-600">DASHBOARD_CORS_ORIGINS</code> on the droplet, and serve the API over{' '}
+              <strong className="text-zinc-400">HTTPS</strong> (browsers block HTTPS Pages → HTTP API).
+            </p>
+          </div>
+        </div>
+      ) : (
       <div className="flex min-h-0 flex-1 flex-col gap-4 px-0 pb-6 pt-3 lg:grid lg:grid-cols-5 lg:gap-6 lg:px-8 lg:pb-10">
         <div className="min-h-0 space-y-4 lg:col-span-3 lg:flex lg:flex-col lg:gap-4">
           <div className="px-4 lg:hidden">
@@ -321,6 +352,7 @@ export function HomeView() {
           )}
         </aside>
       </div>
+      )}
     </div>
   )
 }
