@@ -1,10 +1,17 @@
-import { useEffect, useMemo, useState } from 'react'
-import { completeTask, fetchTasksByList } from '../api/tasks'
+import { useEffect, useState } from 'react'
+import { fetchTodayCalendar } from '../api/calendar'
+import { completeTask, fetchTasksByList, reopenTask } from '../api/tasks'
+import { AllDayBanner } from '../components/command-center/AllDayBanner'
+import { ConnectGoogleBanner } from '../components/ConnectGoogleBanner'
 import { LoadErrorCard } from '../components/ui/LoadErrorCard'
 import { SectionSkeleton } from '../components/ui/SectionSkeleton'
-import type { TaskItem } from '../constants/mockData'
+import type { AllDayEvent } from '../constants/commandCenterMock'
+import type { CalendarEvent, TaskItem } from '../constants/mockData'
 import { TASK_LIFE_TABS } from '../constants/taskTabs'
-import { todayIsoDate } from '../utils/date'
+
+function sortEventsByTime(events: CalendarEvent[]) {
+  return [...events].sort((a, b) => a.startTime.localeCompare(b.startTime))
+}
 
 const priorityDot = {
   high: 'bg-red-500',
@@ -12,49 +19,103 @@ const priorityDot = {
   low: 'bg-zinc-500',
 } as const
 
+type TabId = (typeof TASK_LIFE_TABS)[number]['id']
+
 export function TasksView() {
   const [tasksByList, setTasksByList] = useState<Record<string, TaskItem[]>>({})
-  const [tabId, setTabId] = useState<(typeof TASK_LIFE_TABS)[number]['id']>('home')
-  const [completedIds, setCompletedIds] = useState<Set<string>>(() => new Set())
+  /** Session-only: tasks completed in this visit (cleared on reload). */
+  const [completedByList, setCompletedByList] = useState<Record<string, TaskItem[]>>({})
+  const [tabId, setTabId] = useState<TabId>('inbox')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const today = useMemo(() => todayIsoDate(), [])
+  const [actionErr, setActionErr] = useState<string | null>(null)
+  const [calendarDateLabel, setCalendarDateLabel] = useState('')
+  const [allDayEvents, setAllDayEvents] = useState<AllDayEvent[]>([])
+  const [timedEvents, setTimedEvents] = useState<CalendarEvent[]>([])
+  const [errCalendar, setErrCalendar] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    fetchTasksByList()
-      .then((res) => {
-        if (cancelled) return
-        setTasksByList(res.tasksByList)
+    async function load() {
+      setLoading(true)
+      const [calSettled, taskSettled] = await Promise.allSettled([
+        fetchTodayCalendar(),
+        fetchTasksByList(),
+      ])
+      if (cancelled) return
+      if (calSettled.status === 'fulfilled') {
+        setCalendarDateLabel(calSettled.value.dateLabel)
+        setAllDayEvents(calSettled.value.allDayEvents)
+        setTimedEvents(sortEventsByTime(calSettled.value.events))
+        setErrCalendar(null)
+      } else {
+        setCalendarDateLabel('')
+        setAllDayEvents([])
+        setTimedEvents([])
+        const r = calSettled.reason
+        setErrCalendar(r instanceof Error ? r.message : 'Unable to load calendar')
+      }
+      if (taskSettled.status === 'fulfilled') {
+        setTasksByList(taskSettled.value.tasksByList)
+        setCompletedByList({})
         setError(null)
-      })
-      .catch((e: Error) => {
-        if (cancelled) return
-        setError(e.message)
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
+      } else {
+        const r = taskSettled.reason
+        setError(r instanceof Error ? r.message : 'Unable to load tasks')
+      }
+      setLoading(false)
+    }
+    load()
     return () => {
       cancelled = true
     }
   }, [])
 
-  const activeListKey = TASK_LIFE_TABS.find((t) => t.id === tabId)?.listKey ?? 'Home'
-  const tasks = tasksByList[activeListKey] ?? []
+  const activeListKey =
+    TASK_LIFE_TABS.find((t) => t.id === tabId)?.listKey ?? TASK_LIFE_TABS[0].listKey
+  const openTasks = tasksByList[activeListKey] ?? []
+  const completedTasks = completedByList[activeListKey] ?? []
 
-  async function toggleComplete(taskId: string) {
-    const task = tasks.find((t) => t.id === taskId)
-    const willComplete = !completedIds.has(taskId)
-    if (task && willComplete) {
-      await completeTask(task.title, activeListKey)
+  async function markComplete(task: TaskItem) {
+    setActionErr(null)
+    try {
+      const ok = await completeTask(task.title, activeListKey)
+      if (!ok) {
+        setActionErr('Could not complete task.')
+        return
+      }
+      setTasksByList((prev) => ({
+        ...prev,
+        [activeListKey]: (prev[activeListKey] ?? []).filter((t) => t.id !== task.id),
+      }))
+      setCompletedByList((prev) => ({
+        ...prev,
+        [activeListKey]: [...(prev[activeListKey] ?? []), task],
+      }))
+    } catch (e) {
+      setActionErr(e instanceof Error ? e.message : 'Could not complete task.')
     }
-    setCompletedIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(taskId)) next.delete(taskId)
-      else next.add(taskId)
-      return next
-    })
+  }
+
+  async function markReopen(task: TaskItem) {
+    setActionErr(null)
+    try {
+      const ok = await reopenTask(task.title, activeListKey)
+      if (!ok) {
+        setActionErr('Could not reopen task.')
+        return
+      }
+      setCompletedByList((prev) => ({
+        ...prev,
+        [activeListKey]: (prev[activeListKey] ?? []).filter((t) => t.id !== task.id),
+      }))
+      setTasksByList((prev) => ({
+        ...prev,
+        [activeListKey]: [task, ...(prev[activeListKey] ?? [])],
+      }))
+    } catch (e) {
+      setActionErr(e instanceof Error ? e.message : 'Could not reopen task.')
+    }
   }
 
   if (loading) {
@@ -67,92 +128,177 @@ export function TasksView() {
     )
   }
 
-  if (error) {
-    return (
-      <div className="flex min-h-0 flex-1 flex-col px-4 pb-8 pt-4 sm:px-6 lg:px-8 lg:pt-6">
-        <LoadErrorCard label="Unable to load tasks" />
-      </div>
-    )
-  }
-
   return (
     <div className="flex min-h-0 flex-1 flex-col pt-4 lg:pt-6">
-      <div className="px-4 sm:px-6 lg:px-8">
-        <h1 className="text-xl font-semibold">Tasks</h1>
-        <p className="mt-1 text-sm text-zinc-500">Life-area lists</p>
-      </div>
-
-      <div className="mt-4 w-full overflow-x-auto border-b border-[#1f2430] pb-px">
-        <div className="flex min-h-[48px] w-max gap-1 px-4 sm:px-6 lg:px-8">
-          {TASK_LIFE_TABS.map((t) => {
-            const active = tabId === t.id
-            return (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => setTabId(t.id)}
-                className={`shrink-0 rounded-t-lg px-4 py-2 text-sm font-medium transition ${
-                  active
-                    ? 'bg-[#12151c] text-teal-300'
-                    : 'text-zinc-500 hover:text-zinc-300'
-                }`}
-              >
-                {t.label}
-              </button>
-            )
-          })}
+      <div className="space-y-4 px-4 sm:px-6 lg:px-8">
+        <ConnectGoogleBanner />
+        <div>
+          <h1 className="text-xl font-semibold">Tasks</h1>
+          <p className="mt-1 text-sm text-zinc-500">Google Calendar today and life-area task lists</p>
         </div>
+        <section aria-label="Today's calendar">
+          <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
+            Today&apos;s calendar
+          </h2>
+          {calendarDateLabel ? (
+            <p className="mt-2 text-sm font-medium text-zinc-300">{calendarDateLabel}</p>
+          ) : null}
+          {errCalendar ? (
+            <div className="mt-3">
+              <LoadErrorCard label="Unable to load calendar" />
+            </div>
+          ) : (
+            <>
+              <div className="mt-2">
+                <AllDayBanner events={allDayEvents} />
+              </div>
+              {timedEvents.length === 0 ? (
+                <p className="mt-3 rounded-2xl border border-dashed border-[#2a3142] px-4 py-8 text-center text-sm text-zinc-500">
+                  No timed events today
+                </p>
+              ) : (
+                <ul className="mt-3 space-y-2">
+                  {timedEvents.map((ev) => (
+                    <li
+                      key={ev.id}
+                      className="overflow-hidden rounded-2xl border border-[#1f2430] bg-[#12151c]"
+                    >
+                      <div className="flex min-h-[48px]">
+                        <div
+                          className="w-1.5 shrink-0"
+                          style={{ backgroundColor: ev.color }}
+                          aria-hidden
+                        />
+                        <div className="min-w-0 flex-1 p-3">
+                          <p className="text-sm font-semibold text-zinc-100">{ev.title}</p>
+                          <p className="mt-0.5 text-xs text-zinc-500">
+                            {ev.startTime}–{ev.endTime}
+                            {ev.calendarName ? ` · ${ev.calendarName}` : ''}
+                          </p>
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
+        </section>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-8 pt-4 sm:px-6 lg:px-8">
-        {tasks.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-[#2a3142] py-16 text-center text-sm text-zinc-500">
-            All done in this list.
+      {error ? (
+        <div className="mt-4 px-4 sm:px-6 lg:px-8">
+          <LoadErrorCard label="Unable to load tasks" />
+        </div>
+      ) : (
+        <>
+          <div className="px-4 sm:px-6 lg:px-8">
+            <h2 className="mt-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
+              Google Tasks
+            </h2>
           </div>
-        ) : (
-          <ul className="mx-auto max-w-2xl space-y-2">
-            {tasks.map((t) => {
-              const done = completedIds.has(t.id)
-              const overdue = t.dueDate < today && !done
-              return (
-                <li
-                  key={t.id}
-                  className={`flex min-h-[52px] items-center gap-3 rounded-2xl border border-[#1f2430] bg-[#12151c] px-3 py-2 ${
-                    overdue ? 'border-red-500/35 bg-red-500/5' : ''
-                  }`}
-                >
-                  <span
-                    className={`h-2.5 w-2.5 shrink-0 rounded-full ${priorityDot[t.priority]}`}
-                    title="Priority"
-                  />
-                  <label className="flex min-h-[44px] min-w-0 flex-1 cursor-pointer items-center gap-3">
-                    <input
-                      type="checkbox"
-                      checked={done}
-                      onChange={() => toggleComplete(t.id)}
-                      className="h-5 w-5 shrink-0 rounded border-[#2a3142] bg-[#0c0e12] text-teal-500"
-                    />
-                    <span
-                      className={`min-w-0 flex-1 text-sm ${
-                        done ? 'text-zinc-500 line-through' : overdue ? 'text-red-300' : 'text-zinc-100'
-                      }`}
-                    >
-                      {t.title}
-                    </span>
-                  </label>
-                  <span
-                    className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-medium ${
-                      overdue ? 'bg-red-500/20 text-red-300' : 'bg-[#1a1f2e] text-zinc-400'
+
+          <div className="mt-4 w-full overflow-x-auto border-b border-[#1f2430] pb-px">
+            <div className="flex min-h-[48px] w-max gap-1 px-4 sm:px-6 lg:px-8">
+              {TASK_LIFE_TABS.map((t) => {
+                const active = tabId === t.id
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => {
+                      setTabId(t.id)
+                      setActionErr(null)
+                    }}
+                    className={`shrink-0 rounded-t-lg px-4 py-2 text-sm font-medium transition ${
+                      active
+                        ? 'bg-[#12151c] text-teal-300'
+                        : 'text-zinc-500 hover:text-zinc-300'
                     }`}
                   >
-                    {t.dueDate}
+                    {t.label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pb-8 pt-4 sm:px-6 lg:px-8">
+            {actionErr ? (
+              <p className="mb-3 text-center text-sm text-red-400" role="alert">
+                {actionErr}
+              </p>
+            ) : null}
+
+            {openTasks.length === 0 && completedTasks.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-[#2a3142] py-16 text-center text-sm text-zinc-500">
+                All done in this list.
+              </div>
+            ) : openTasks.length === 0 ? (
+              <p className="py-6 text-center text-sm text-zinc-500">No open tasks</p>
+            ) : (
+              <ul className="mx-auto max-w-2xl space-y-2">
+                {openTasks.map((t) => (
+                  <li
+                    key={t.id}
+                    className="flex min-h-[52px] items-center gap-3 rounded-2xl border border-[#1f2430] bg-[#12151c] px-3 py-2"
+                  >
+                    <span
+                      className={`h-2.5 w-2.5 shrink-0 rounded-full ${priorityDot[t.priority]}`}
+                      title="Priority"
+                    />
+                    <label className="flex min-h-[44px] min-w-0 flex-1 cursor-pointer items-center gap-3">
+                      <input
+                        type="checkbox"
+                        checked={false}
+                        onChange={() => markComplete(t)}
+                        className="h-5 w-5 shrink-0 rounded border-[#2a3142] bg-[#0c0e12] text-teal-500"
+                      />
+                      <span className="min-w-0 flex-1 text-sm text-zinc-100">{t.title}</span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {completedTasks.length > 0 ? (
+              <details
+                key={activeListKey}
+                className="mx-auto mt-8 max-w-2xl border-t border-[#1f2430] pt-4"
+              >
+                <summary className="cursor-pointer list-none text-sm font-medium text-zinc-400 [&::-webkit-details-marker]:hidden">
+                  <span className="inline-flex items-center gap-2">
+                    <span className="text-zinc-500">▸</span>
+                    Completed ({completedTasks.length})
                   </span>
-                </li>
-              )
-            })}
-          </ul>
-        )}
-      </div>
+                </summary>
+                <ul className="mt-3 space-y-2">
+                  {completedTasks.map((t) => (
+                    <li
+                      key={t.id}
+                      className="flex min-h-[52px] items-center gap-3 rounded-2xl border border-[#1f2430]/80 bg-[#0c0e12]/80 px-3 py-2 opacity-90"
+                    >
+                      <span
+                        className={`h-2.5 w-2.5 shrink-0 rounded-full ${priorityDot[t.priority]}`}
+                        title="Priority"
+                      />
+                      <label className="flex min-h-[44px] min-w-0 flex-1 cursor-pointer items-center gap-3">
+                        <input
+                          type="checkbox"
+                          checked
+                          onChange={() => markReopen(t)}
+                          className="h-5 w-5 shrink-0 rounded border-[#2a3142] bg-[#0c0e12] text-teal-500"
+                        />
+                        <span className="min-w-0 flex-1 text-sm text-zinc-500 line-through">{t.title}</span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            ) : null}
+          </div>
+        </>
+      )}
     </div>
   )
 }

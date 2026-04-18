@@ -33,17 +33,28 @@ function mapApiTask(t: ApiTask, list: string, i: number): TaskItem {
 
 export async function fetchTasksByList(): Promise<TasksByListResponse> {
   const keys = TASK_LIFE_TABS.map((t) => t.listKey)
-  const results = await Promise.all(
+  const settled = await Promise.allSettled(
     keys.map((listKey) =>
-      apiJson<{ tasks: ApiTask[] }>(`/tasks/list/${encodeURIComponent(listKey)}`).catch(() => ({
-        tasks: [] as ApiTask[],
-      })),
+      apiJson<{ tasks: ApiTask[] }>(`/tasks/list/${encodeURIComponent(listKey)}`),
     ),
   )
   const tasksByList: Record<string, TaskItem[]> = {}
+  let anyOk = false
+  let firstErr: Error | null = null
   keys.forEach((k, i) => {
-    tasksByList[k] = results[i].tasks.map((t, j) => mapApiTask(t, k, j))
+    const r = settled[i]
+    if (r.status === 'fulfilled') {
+      anyOk = true
+      tasksByList[k] = r.value.tasks.map((t, j) => mapApiTask(t, k, j))
+    } else {
+      tasksByList[k] = []
+      const reason = r.reason
+      if (!firstErr && reason instanceof Error) firstErr = reason
+    }
   })
+  if (!anyOk && firstErr) {
+    throw firstErr
+  }
   return { order: keys, tasksByList }
 }
 
@@ -68,6 +79,14 @@ export async function fetchTasksDueTomorrow(): Promise<Pick<TaskItem, 'id' | 'ti
 
 export async function completeTask(title: string, listName?: string): Promise<boolean> {
   const res = await apiJson<{ success: boolean }>('/tasks/complete', {
+    method: 'POST',
+    body: JSON.stringify({ title, list_name: listName ?? null }),
+  })
+  return res.success
+}
+
+export async function reopenTask(title: string, listName?: string): Promise<boolean> {
+  const res = await apiJson<{ success: boolean }>('/tasks/reopen', {
     method: 'POST',
     body: JSON.stringify({ title, list_name: listName ?? null }),
   })

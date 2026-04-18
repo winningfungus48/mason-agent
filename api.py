@@ -270,6 +270,11 @@ class TaskCompleteBody(BaseModel):
     list_name: Optional[str] = None
 
 
+class TaskReopenBody(BaseModel):
+    title: str
+    list_name: Optional[str] = None
+
+
 class TaskAddBody(BaseModel):
     title: str
     list_name: Optional[str] = None
@@ -997,6 +1002,16 @@ async def tasks_list_one(list_name: str):
 async def tasks_complete(body: TaskCompleteBody):
     try:
         msg = await run_in_threadpool(tasks_agent.tasks_complete, body.title, body.list_name)
+        ok = str(msg).startswith("✅")
+        return {"success": ok, "message": msg}
+    except Exception as e:
+        raise HTTPException(500, detail={"error": str(e)})
+
+
+@app.post("/tasks/reopen", dependencies=[Auth])
+async def tasks_reopen(body: TaskReopenBody):
+    try:
+        msg = await run_in_threadpool(tasks_agent.tasks_reopen, body.title, body.list_name)
         ok = str(msg).startswith("✅")
         return {"success": ok, "message": msg}
     except Exception as e:

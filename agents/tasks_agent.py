@@ -24,7 +24,7 @@ def wrap_display(content):
 
 def get_all_task_lists(service):
     """Return all task lists as list of (id, title) tuples."""
-    result = service.tasklists().list(maxResults=20).execute()
+    result = service.tasklists().list(maxResults=100).execute()
     return [(tl['id'], tl['title']) for tl in result.get('items', [])]
 
 
@@ -241,6 +241,36 @@ def tasks_complete(title_search, list_name=None):
         return f"No pending task matching '{title_search}' was found."
     except Exception as e:
         return f"Error completing task: {str(e)}"
+
+
+def tasks_reopen(title_search, list_name=None):
+    """Mark a completed task as needsAction again (same list scope as tasks_complete)."""
+    try:
+        print(f"  [TOOL] Reopening task: {title_search}")
+        service = get_tasks_service()
+
+        if list_name:
+            list_id, list_display = find_list_by_name(service, list_name)
+            lists_to_check = [(list_id, list_display)] if list_id else []
+        else:
+            lists_to_check = get_all_task_lists(service)
+
+        for list_id, list_display in lists_to_check:
+            result = service.tasks().list(tasklist=list_id, maxResults=100, showCompleted=True).execute()
+            for task in result.get('items', []):
+                if task.get('status') != 'completed':
+                    continue
+                if title_search.lower() in task.get('title', '').lower():
+                    service.tasks().patch(
+                        tasklist=list_id,
+                        task=task['id'],
+                        body={'status': 'needsAction'},
+                    ).execute()
+                    return f"✅ Reopened: '{task['title']}' in '{list_display}'"
+
+        return f"No completed task matching '{title_search}' was found."
+    except Exception as e:
+        return f"Error reopening task: {str(e)}"
 
 
 def tasks_delete(title_search, list_name=None):
