@@ -28,7 +28,13 @@ CREDS = os.path.join(REPO_ROOT, "credentials.json")
 
 def main() -> int:
     if not os.path.isfile(CREDS):
-        print(f"Missing {CREDS} — add OAuth client JSON from Google Cloud (Desktop app).", file=sys.stderr)
+        print(f"Missing {CREDS}", file=sys.stderr)
+        print(
+            "  If it already exists on your droplet, copy it here first, e.g.\n"
+            "    scp mason@YOUR_DROPLET:/home/mason/agent/credentials.json .\n"
+            "  Or download the OAuth client JSON again from Google Cloud Console (Desktop app).",
+            file=sys.stderr,
+        )
         return 1
     from core.google_auth import get_service
 
