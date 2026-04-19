@@ -33,4 +33,5 @@ The workflow builds with `--base=/mason-agent/`. **`VITE_API_URL`** must be an *
 ## Architecture
 
 - **Frontend:** Vite + React + Tailwind CSS v4 (`@tailwindcss/vite`).
+- **UI copy (static):** Edit `src/content/appContent.json` for labels, nav, calendar strings — imported at build time, no runtime fetch.
 - **Backend:** FastAPI in repo root `api.py`, same droplet as the Telegram agent.

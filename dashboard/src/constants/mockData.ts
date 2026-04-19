@@ -38,6 +38,8 @@ export type Chore = {
   done: boolean
   daysSinceLastDone: number | null
   bucket: 'today' | 'week' | 'month'
+  category?: string
+  emoji?: string
 }
 
 export type GroceryItem = {

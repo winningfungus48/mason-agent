@@ -1,0 +1,39 @@
+{
+  "shell": {
+    "eyebrow": "Personal ops",
+    "title": "Chief of Staff",
+    "subtitle": "Google Calendar, Tasks & home ops",
+    "chatLabel": "Chat",
+    "backToHome": "← Back to home",
+    "ariaBack": "Back to home"
+  },
+  "primaryNav": [
+    { "id": "home", "label": "Home", "icon": "🏠" },
+    { "id": "calendar", "label": "Calendar", "icon": "📅" },
+    { "id": "habits", "label": "Habits", "icon": "💪" },
+    { "id": "chores", "label": "Chores", "icon": "🧹" },
+    { "id": "tasks", "label": "Tasks", "icon": "✅" },
+    { "id": "chat", "label": "Chat", "icon": "💬" }
+  ],
+  "stackTitles": {
+    "brief": "Morning brief",
+    "grocery": "Grocery list",
+    "reminders": "Reminders"
+  },
+  "calendar": {
+    "pageTitle": "Calendar",
+    "today": "Today",
+    "modes": {
+      "day": "Day",
+      "week": "Week",
+      "month": "Month"
+    },
+    "prevAria": "Previous",
+    "nextAria": "Next",
+    "monthGridLabel": "Month",
+    "eventsThisMonth": "Events this month",
+    "noEvents": "No events",
+    "noData": "No data",
+    "loadError": "Unable to load calendar"
+  }
+}

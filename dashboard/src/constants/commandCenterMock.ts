@@ -103,10 +103,10 @@ export const mockTimelineReminders: (Reminder & { sortMinutes: number })[] = [
   },
 ]
 
-/** Suggested times for chore blocks (display + sort). */
-export const CHORE_TIMELINE_SLOTS: { choreId: string; minutes: number }[] = [
-  { choreId: 'c1', minutes: timeToMinutes('08:00') },
-  { choreId: 'c2', minutes: timeToMinutes('19:00') },
+/** Suggested times for chore blocks (display + sort) — first two chores from `/chores/today`. */
+export const CHORE_TIMELINE_SLOTS: { choreIndex: number; minutes: number }[] = [
+  { choreIndex: 0, minutes: timeToMinutes('08:00') },
+  { choreIndex: 1, minutes: timeToMinutes('19:00') },
 ]
 
 export const HABIT_BLOCK = {

@@ -1,10 +1,5 @@
+import { appContent } from '../../content/appContent'
 import { useNavigation } from '../../context/NavigationContext'
-
-const titles: Record<string, string> = {
-  brief: 'Morning brief',
-  grocery: 'Grocery list',
-  reminders: 'Reminders',
-}
 
 export function MobileStackHeader() {
   const { view, goBackFromStack } = useNavigation()
@@ -17,11 +12,11 @@ export function MobileStackHeader() {
         type="button"
         onClick={goBackFromStack}
         className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-lg text-zinc-300 hover:bg-[#12151c]"
-        aria-label="Back to home"
+        aria-label={appContent.shell.ariaBack}
       >
         ←
       </button>
-      <h1 className="text-base font-semibold">{titles[view]}</h1>
+      <h1 className="text-base font-semibold">{appContent.stackTitles[view]}</h1>
     </header>
   )
 }

@@ -1,17 +1,10 @@
 import { useEffect, useState } from 'react'
-import { fetchTodayCalendar } from '../api/calendar'
 import { completeTask, fetchTasksByList, reopenTask } from '../api/tasks'
-import { AllDayBanner } from '../components/command-center/AllDayBanner'
 import { ConnectGoogleBanner } from '../components/ConnectGoogleBanner'
 import { LoadErrorCard } from '../components/ui/LoadErrorCard'
 import { SectionSkeleton } from '../components/ui/SectionSkeleton'
-import type { AllDayEvent } from '../constants/commandCenterMock'
-import type { CalendarEvent, TaskItem } from '../constants/mockData'
+import type { TaskItem } from '../constants/mockData'
 import { TASK_LIFE_TABS } from '../constants/taskTabs'
-
-function sortEventsByTime(events: CalendarEvent[]) {
-  return [...events].sort((a, b) => a.startTime.localeCompare(b.startTime))
-}
 
 const priorityDot = {
   high: 'bg-red-500',
@@ -29,41 +22,23 @@ export function TasksView() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [actionErr, setActionErr] = useState<string | null>(null)
-  const [calendarDateLabel, setCalendarDateLabel] = useState('')
-  const [allDayEvents, setAllDayEvents] = useState<AllDayEvent[]>([])
-  const [timedEvents, setTimedEvents] = useState<CalendarEvent[]>([])
-  const [errCalendar, setErrCalendar] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
     async function load() {
       setLoading(true)
-      const [calSettled, taskSettled] = await Promise.allSettled([
-        fetchTodayCalendar(),
-        fetchTasksByList(),
-      ])
-      if (cancelled) return
-      if (calSettled.status === 'fulfilled') {
-        setCalendarDateLabel(calSettled.value.dateLabel)
-        setAllDayEvents(calSettled.value.allDayEvents)
-        setTimedEvents(sortEventsByTime(calSettled.value.events))
-        setErrCalendar(null)
-      } else {
-        setCalendarDateLabel('')
-        setAllDayEvents([])
-        setTimedEvents([])
-        const r = calSettled.reason
-        setErrCalendar(r instanceof Error ? r.message : 'Unable to load calendar')
-      }
-      if (taskSettled.status === 'fulfilled') {
-        setTasksByList(taskSettled.value.tasksByList)
+      try {
+        const res = await fetchTasksByList()
+        if (cancelled) return
+        setTasksByList(res.tasksByList)
         setCompletedByList({})
         setError(null)
-      } else {
-        const r = taskSettled.reason
-        setError(r instanceof Error ? r.message : 'Unable to load tasks')
+      } catch (e) {
+        if (cancelled) return
+        setError(e instanceof Error ? e.message : 'Unable to load tasks')
+      } finally {
+        if (!cancelled) setLoading(false)
       }
-      setLoading(false)
     }
     load()
     return () => {
@@ -134,56 +109,8 @@ export function TasksView() {
         <ConnectGoogleBanner />
         <div>
           <h1 className="text-xl font-semibold">Tasks</h1>
-          <p className="mt-1 text-sm text-zinc-500">Google Calendar today and life-area task lists</p>
+          <p className="mt-1 text-sm text-zinc-500">Google Tasks — life-area lists</p>
         </div>
-        <section aria-label="Today's calendar">
-          <h2 className="text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
-            Today&apos;s calendar
-          </h2>
-          {calendarDateLabel ? (
-            <p className="mt-2 text-sm font-medium text-zinc-300">{calendarDateLabel}</p>
-          ) : null}
-          {errCalendar ? (
-            <div className="mt-3">
-              <LoadErrorCard label="Unable to load calendar" />
-            </div>
-          ) : (
-            <>
-              <div className="mt-2">
-                <AllDayBanner events={allDayEvents} />
-              </div>
-              {timedEvents.length === 0 ? (
-                <p className="mt-3 rounded-2xl border border-dashed border-[#2a3142] px-4 py-8 text-center text-sm text-zinc-500">
-                  No timed events today
-                </p>
-              ) : (
-                <ul className="mt-3 space-y-2">
-                  {timedEvents.map((ev) => (
-                    <li
-                      key={ev.id}
-                      className="overflow-hidden rounded-2xl border border-[#1f2430] bg-[#12151c]"
-                    >
-                      <div className="flex min-h-[48px]">
-                        <div
-                          className="w-1.5 shrink-0"
-                          style={{ backgroundColor: ev.color }}
-                          aria-hidden
-                        />
-                        <div className="min-w-0 flex-1 p-3">
-                          <p className="text-sm font-semibold text-zinc-100">{ev.title}</p>
-                          <p className="mt-0.5 text-xs text-zinc-500">
-                            {ev.startTime}–{ev.endTime}
-                            {ev.calendarName ? ` · ${ev.calendarName}` : ''}
-                          </p>
-                        </div>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </>
-          )}
-        </section>
       </div>
 
       {error ? (

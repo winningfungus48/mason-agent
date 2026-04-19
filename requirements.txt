@@ -9,3 +9,5 @@ fastapi
 uvicorn[standard]
 pydantic
 itsdangerous
+# IANA time zones for zoneinfo (needed on Windows; harmless on Linux/macOS)
+tzdata>=2024.1

@@ -63,9 +63,8 @@ export function buildTimelineEntries(
     })
   }
 
-  const choreById = new Map(chores.map((c) => [c.id, c]))
   for (const slot of CHORE_TIMELINE_SLOTS) {
-    const c = choreById.get(slot.choreId)
+    const c = chores[slot.choreIndex]
     if (c) {
       entries.push({
         id: `chore-${c.id}-${slot.minutes}`,

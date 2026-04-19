@@ -1,4 +1,5 @@
 import { isStackView } from '../../constants/navigation'
+import { appContent } from '../../content/appContent'
 import { useNavigation } from '../../context/NavigationContext'
 
 export function DesktopStackBar() {
@@ -13,7 +14,7 @@ export function DesktopStackBar() {
         onClick={goBackFromStack}
         className="flex min-h-[44px] min-w-[44px] items-center gap-2 rounded-xl px-2 text-sm font-medium text-zinc-300 hover:bg-[#12151c]"
       >
-        ← Back to home
+        {appContent.shell.backToHome}
       </button>
     </div>
   )

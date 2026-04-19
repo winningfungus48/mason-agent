@@ -1,17 +1,9 @@
 import { useNavigation } from '../../context/NavigationContext'
-import type { PrimaryView } from '../../constants/navigation'
-
-const tabs: { id: PrimaryView; label: string; icon: string }[] = [
-  { id: 'home', label: 'Home', icon: '🏠' },
-  { id: 'calendar', label: 'Calendar', icon: '📅' },
-  { id: 'habits', label: 'Habits', icon: '💪' },
-  { id: 'chores', label: 'Chores', icon: '🧹' },
-  { id: 'tasks', label: 'Tasks', icon: '✅' },
-  { id: 'chat', label: 'Chat', icon: '💬' },
-]
+import { appContent } from '../../content/appContent'
 
 export function MobileTabBar() {
   const { primaryTab, goToPrimary } = useNavigation()
+  const tabs = appContent.primaryNav
 
   return (
     <nav

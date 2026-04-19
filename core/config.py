@@ -6,6 +6,7 @@ All hardcoded values live here. Change once, updates everywhere.
 """
 
 import os
+import zoneinfo
 
 # ── Paths ──────────────────────────────────────────────────────────────────
 BASE_DIR      = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -13,8 +14,37 @@ DOCUMENTS_DIR = os.path.join(BASE_DIR, "documents")
 TOKEN_PATH    = os.path.join(BASE_DIR, "token.json")
 CREDS_PATH    = os.path.join(BASE_DIR, "credentials.json")
 
+
+def _resolve_timezone() -> str:
+    """IANA zone for calendar APIs. Optional env TIMEZONE; fixes common typos and falls back safely."""
+    default = "America/Chicago"
+    raw_env = os.environ.get("TIMEZONE")
+    if raw_env is None or not str(raw_env).strip():
+        return default
+    raw = str(raw_env).strip().strip("'\"")
+    if not raw:
+        return default
+    # Typos seen in the wild: AMerica/Chicao, etc.
+    normalized = (
+        raw.replace("AMerica", "America")
+        .replace("Chicao", "Chicago")
+        .replace("chicao", "Chicago")
+    )
+    order = (normalized, raw) if normalized != raw else (raw,)
+    for candidate in order:
+        try:
+            zoneinfo.ZoneInfo(candidate)
+            if candidate != raw:
+                print(f"[config] TIMEZONE corrected {raw!r} -> {candidate!r}", flush=True)
+            return candidate
+        except Exception:
+            continue
+    print(f"[config] Invalid TIMEZONE {raw!r}, using {default!r}", flush=True)
+    return default
+
+
 # ── Timezone ───────────────────────────────────────────────────────────────
-TIMEZONE = "America/Chicago"
+TIMEZONE = _resolve_timezone()
 
 # ── Google API Scopes ──────────────────────────────────────────────────────
 GOOGLE_SCOPES = [

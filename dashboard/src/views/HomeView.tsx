@@ -5,8 +5,8 @@ import { fetchTodaysChores } from '../api/chores'
 import { fetchHabits } from '../api/habits'
 import { isApiConfigured } from '../config/apiEnv'
 import { fetchTasksDueToday, fetchTasksDueTomorrow } from '../api/tasks'
+import { DaySchedulePanel } from '../components/calendar/DaySchedulePanel'
 import { ConnectGoogleBanner } from '../components/ConnectGoogleBanner'
-import { AllDayBanner } from '../components/command-center/AllDayBanner'
 import { DayHeader } from '../components/command-center/DayHeader'
 import { MorningBriefCard } from '../components/command-center/MorningBriefCard'
 import { QuickActionsRow } from '../components/command-center/QuickActionsRow'
@@ -172,17 +172,18 @@ export function HomeView() {
 
   const nextEvent = events[0] ?? null
 
+  /** Calendar is shown in Today's schedule panel; timeline is chores / habits / tasks / reminders only. */
   const timelineEntries = useMemo(
     () =>
       buildTimelineEntries(
-        events,
+        [],
         chores,
         habits,
         allTasks,
         mockTimelineReminders,
         todayIso,
       ),
-    [events, chores, habits, allTasks, todayIso],
+    [chores, habits, allTasks, todayIso],
   )
 
   const summaryLine = useMemo(() => {
@@ -291,12 +292,25 @@ export function HomeView() {
           </div>
 
           <div className="px-4 lg:px-0">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
+              Today&apos;s calendar
+            </p>
             {loading ? (
               <SectionSkeleton rows={2} />
             ) : errCalendar ? (
               <LoadErrorCard label="Unable to load calendar" />
             ) : (
-              <AllDayBanner events={allDayEvents} />
+              <DaySchedulePanel
+                dateLabel={new Date(`${todayIso}T12:00:00`).toLocaleDateString(undefined, {
+                  weekday: 'long',
+                  month: 'long',
+                  day: 'numeric',
+                  year: 'numeric',
+                })}
+                allDayEvents={allDayEvents}
+                events={events}
+                compact
+              />
             )}
           </div>
 

@@ -165,6 +165,15 @@ def _parse_completion_log():
     return rows
 
 
+def append_chore_completion(display_name: str, note=None):
+    """Append one line to chore_completions.txt (existing pipe format)."""
+    today = date.today().strftime("%Y-%m-%d")
+    note = note or ""
+    entry = f"{today}|{display_name}|{note}\n"
+    with open(CHORE_LOG_FILE, "a", encoding="utf-8") as f:
+        f.write(entry)
+
+
 def chore_complete(chore_name_input, note=None):
     """Log a chore as completed today (fuzzy match against chores.txt lines)."""
     try:
@@ -173,22 +182,16 @@ def chore_complete(chore_name_input, note=None):
         if not name_q:
             return "No chore name provided."
         lines = _read_chore_lines()
-        matched_line = None
         matched_display = None
         for line in lines:
             disp = _chore_line_name(line)
             if name_q in disp.lower() or disp.lower() in name_q:
-                matched_line = line
                 matched_display = disp
                 break
         if not matched_display:
             return f"Could not find a chore matching '{chore_name_input}'."
 
-        today = date.today().strftime("%Y-%m-%d")
-        note = note or ""
-        entry = f"{today}|{matched_display}|{note}\n"
-        with open(CHORE_LOG_FILE, "a", encoding="utf-8") as f:
-            f.write(entry)
+        append_chore_completion(matched_display, note)
         return f"✅ Logged completion: {matched_display}"
     except Exception as e:
         return f"Error logging chore: {str(e)}"

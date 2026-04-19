@@ -13,6 +13,7 @@ Auth (no third-party IdP):
 from __future__ import annotations
 
 import asyncio
+import calendar as calendar_mod
 import logging
 import os
 import re
@@ -31,7 +32,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 load_dotenv()
 
@@ -39,7 +40,15 @@ BASE_DIR = Path(__file__).resolve().parent
 os.chdir(BASE_DIR)
 
 from agent import run_agent_conversational
-from agents import briefing_agent, chores_agent, habits_agent, lists_agent, tasks_agent
+from agents import briefing_agent, habits_agent, lists_agent, tasks_agent
+from agents.chores_schedule import (
+    build_chores_all,
+    build_chores_monthly,
+    build_chores_quarterly,
+    build_chores_today,
+    build_chores_week,
+    complete_chore_from_schedule,
+)
 from core.config import (
     CREDS_PATH,
     DOCUMENTS_DIR,
@@ -48,11 +57,8 @@ from core.config import (
     HABITS,
     HABIT_FILE,
     LISTS,
-    QUARTERLY_MONTHS,
-    ANNUAL_MONTHS,
     TIMEZONE,
     TOKEN_PATH,
-    WEEKDAY_TAGS,
 )
 
 LOG_DIR = BASE_DIR / "logs"
@@ -253,8 +259,17 @@ class HabitLogBody(BaseModel):
 
 
 class ChoreCompleteBody(BaseModel):
-    chore_name: str
+    chore_id: Optional[str] = None
+    chore_name: Optional[str] = None
     note: Optional[str] = None
+
+    @model_validator(mode="after")
+    def require_chore_identifier(self):
+        if not (self.chore_id and str(self.chore_id).strip()) and not (
+            self.chore_name and str(self.chore_name).strip()
+        ):
+            raise ValueError("Provide chore_id and/or chore_name")
+        return self
 
 
 class GroceryAddBody(BaseModel):
@@ -557,31 +572,111 @@ def _calendar_day_events(target_date: date) -> dict[str, Any]:
     }
 
 
-def _calendar_week_json() -> dict[str, Any]:
-    out: dict[str, list[dict]] = {}
-    today = date.today()
-    for i in range(7):
-        d = today + timedelta(days=i)
-        key = d.strftime("%Y-%m-%d")
-        day_data = _calendar_day_events(d)
-        merged: list[dict] = []
-        for e in day_data["all_day_events"]:
-            merged.append(
-                {
-                    "id": e.get("id", ""),
-                    "title": e["title"],
-                    "start": f"{key}T00:00:00",
-                    "end": f"{key}T23:59:59",
-                    "calendar": e["calendar"],
-                    "color_hex": e.get("color", "#4285f4"),
-                    "description": "",
-                    "all_day": True,
-                }
+def _calendar_range_merged_by_day(start_d: date, end_d: date) -> dict[str, list[dict[str, Any]]]:
+    """
+    Single range query per calendar, bucketed by local date (TIMEZONE).
+    Merged event shape matches the prior /calendar/week contract.
+    """
+    from agents.calendar_agent import get_all_calendar_ids, get_calendar_service
+
+    tz = zoneinfo.ZoneInfo(TIMEZONE)
+    day_keys: list[str] = []
+    d = start_d
+    while d <= end_d:
+        day_keys.append(d.strftime("%Y-%m-%d"))
+        d += timedelta(days=1)
+    bucket: dict[str, list[dict[str, Any]]] = {k: [] for k in day_keys}
+
+    service = get_calendar_service()
+    cal_ids = get_all_calendar_ids(service)
+    time_min = datetime(start_d.year, start_d.month, start_d.day, 0, 0, 0, tzinfo=tz).isoformat()
+    time_max = datetime(end_d.year, end_d.month, end_d.day, 23, 59, 59, tzinfo=tz).isoformat()
+
+    for cal_id, cal_name in cal_ids:
+        try:
+            result = (
+                service.events()
+                .list(
+                    calendarId=cal_id,
+                    timeMin=time_min,
+                    timeMax=time_max,
+                    maxResults=500,
+                    singleEvents=True,
+                    orderBy="startTime",
+                )
+                .execute()
             )
-        for e in day_data["events"]:
-            merged.append({**e, "all_day": False})
-        out[key] = merged
-    return {"days": out}
+        except Exception:
+            continue
+        for event in result.get("items", []):
+            eid = event.get("id", "")
+            summary = event.get("summary", "(no title)")
+            desc = event.get("description", "") or ""
+            color_hex = _event_color_hex(event)
+            estart = event.get("start", {})
+            eend = event.get("end", {})
+
+            if "date" in estart:
+                sd = date.fromisoformat(estart["date"])
+                ed_excl = date.fromisoformat(eend.get("date", estart["date"]))
+                d0 = sd
+                while d0 < ed_excl:
+                    key = d0.strftime("%Y-%m-%d")
+                    if key in bucket:
+                        bucket[key].append(
+                            {
+                                "id": eid,
+                                "title": summary,
+                                "start": f"{key}T00:00:00",
+                                "end": f"{key}T23:59:59",
+                                "calendar": cal_name,
+                                "color_hex": color_hex,
+                                "description": desc,
+                                "all_day": True,
+                            }
+                        )
+                    d0 += timedelta(days=1)
+            else:
+                ds = estart.get("dateTime", "")
+                if not ds or "T" not in ds:
+                    continue
+                dt_start = datetime.fromisoformat(ds.replace("Z", "+00:00")).astimezone(tz)
+                de = eend.get("dateTime", "")
+                dt_end = dt_start
+                if de and "T" in de:
+                    dt_end = datetime.fromisoformat(de.replace("Z", "+00:00")).astimezone(tz)
+                key = dt_start.strftime("%Y-%m-%d")
+                if key in bucket:
+                    bucket[key].append(
+                        {
+                            "id": eid,
+                            "title": summary,
+                            "start": dt_start.isoformat(),
+                            "end": dt_end.isoformat(),
+                            "calendar": cal_name,
+                            "color_hex": color_hex,
+                            "description": desc,
+                            "all_day": False,
+                        }
+                    )
+
+    for k in bucket:
+        bucket[k].sort(key=lambda x: x["start"])
+    return bucket
+
+
+def _calendar_week_json_from(week_start: date) -> dict[str, Any]:
+    end = week_start + timedelta(days=6)
+    days = _calendar_range_merged_by_day(week_start, end)
+    return {"start": week_start.strftime("%Y-%m-%d"), "days": days}
+
+
+def _calendar_month_json(year: int, month: int) -> dict[str, Any]:
+    last = calendar_mod.monthrange(year, month)[1]
+    start_d = date(year, month, 1)
+    end_d = date(year, month, last)
+    days = _calendar_range_merged_by_day(start_d, end_d)
+    return {"year": year, "month": month, "days": days}
 
 
 def _parse_brief_text(raw: str) -> tuple[str, list[str], list[str]]:
@@ -639,111 +734,6 @@ def _parse_brief_file() -> dict[str, Any]:
         "headlines": headlines,
         "sports": sports,
     }
-
-
-def _chore_status_for_today() -> list[dict]:
-    from agents.chores_agent import (
-        _chore_line_name,
-        _parse_completion_log,
-        setup_starter_chores,
-        CHORES_FILE,
-    )
-
-    setup_starter_chores()
-    today = date.today()
-    today_tag = WEEKDAY_TAGS[today.weekday()]
-    month = today.month
-
-    with open(CHORES_FILE, "r", encoding="utf-8") as f:
-        lines = [l.strip() for l in f.readlines() if l.strip()]
-
-    daily = [l for l in lines if l.startswith("[DAILY]")]
-    weekly_today = [l for l in lines if l.startswith(f"[{today_tag}]")]
-    monthly = [l for l in lines if l.startswith("[MONTHLY]")] if today.day == 1 else []
-    quarterly = (
-        [l for l in lines if l.startswith("[QUARTERLY]")]
-        if month in QUARTERLY_MONTHS and today.day <= 7
-        else []
-    )
-    annual = (
-        [l for l in lines if l.startswith("[ANNUALLY]")]
-        if month in ANNUAL_MONTHS and today.day <= 7
-        else []
-    )
-
-    candidates = daily + weekly_today + monthly + quarterly + annual
-    log_rows = _parse_completion_log()
-    last_done: dict[str, str] = {}
-    for d, name, _ in log_rows:
-        key = name.lower()
-        if key not in last_done or d > last_done[key]:
-            last_done[key] = d
-
-    today_str = today.strftime("%Y-%m-%d")
-    out = []
-    for line in candidates:
-        freq = line.split("]")[0].strip("[]") if "]" in line else ""
-        name = _chore_line_name(line)
-        key = name.lower()
-        last = last_done.get(key)
-        completed_today = last == today_str
-        days_since = 0
-        if last:
-            try:
-                ld = datetime.strptime(last, "%Y-%m-%d").date()
-                days_since = (today - ld).days
-            except Exception:
-                days_since = 0
-        out.append(
-            {
-                "name": name,
-                "frequency": freq,
-                "completed": completed_today,
-                "last_done": last,
-                "days_since": days_since,
-            }
-        )
-    return out
-
-
-def _chore_status_all_list() -> list[dict]:
-    from agents.chores_agent import _chore_line_name, _parse_completion_log, setup_starter_chores, CHORES_FILE
-
-    setup_starter_chores()
-    today = date.today()
-    with open(CHORES_FILE, "r", encoding="utf-8") as f:
-        lines = [l.strip() for l in f.readlines() if l.strip()]
-    log_rows = _parse_completion_log()
-    last_done: dict[str, str] = {}
-    for d, name, _ in log_rows:
-        key = name.lower()
-        if key not in last_done or d > last_done[key]:
-            last_done[key] = d
-
-    out = []
-    for line in lines:
-        freq = line.split("]")[0].strip("[]") if "]" in line else ""
-        name = _chore_line_name(line)
-        key = name.lower()
-        last = last_done.get(key)
-        completed_today = last == today.strftime("%Y-%m-%d")
-        days_since = 0
-        if last:
-            try:
-                ld = datetime.strptime(last, "%Y-%m-%d").date()
-                days_since = (today - ld).days
-            except Exception:
-                days_since = 0
-        out.append(
-            {
-                "name": name,
-                "frequency": freq,
-                "completed": completed_today,
-                "last_done": last,
-                "days_since": days_since,
-            }
-        )
-    return out
 
 
 def _regenerate_brief_sync() -> None:
@@ -901,17 +891,49 @@ async def habits_log(body: HabitLogBody):
 @app.get("/chores/today", dependencies=[Auth])
 async def chores_today():
     try:
-        chores = await run_in_threadpool(_chore_status_for_today)
-        return {"chores": chores}
+        return await run_in_threadpool(build_chores_today)
+    except FileNotFoundError as e:
+        raise HTTPException(500, detail={"error": str(e)})
     except Exception as e:
         raise HTTPException(500, detail={"error": str(e)})
 
 
-@app.get("/chores/status", dependencies=[Auth])
-async def chores_status():
+@app.get("/chores/week", dependencies=[Auth])
+async def chores_week():
     try:
-        chores = await run_in_threadpool(_chore_status_all_list)
-        return {"chores": chores}
+        return await run_in_threadpool(build_chores_week)
+    except FileNotFoundError as e:
+        raise HTTPException(500, detail={"error": str(e)})
+    except Exception as e:
+        raise HTTPException(500, detail={"error": str(e)})
+
+
+@app.get("/chores/monthly", dependencies=[Auth])
+async def chores_monthly():
+    try:
+        return await run_in_threadpool(build_chores_monthly)
+    except FileNotFoundError as e:
+        raise HTTPException(500, detail={"error": str(e)})
+    except Exception as e:
+        raise HTTPException(500, detail={"error": str(e)})
+
+
+@app.get("/chores/quarterly", dependencies=[Auth])
+async def chores_quarterly():
+    try:
+        return await run_in_threadpool(build_chores_quarterly)
+    except FileNotFoundError as e:
+        raise HTTPException(500, detail={"error": str(e)})
+    except Exception as e:
+        raise HTTPException(500, detail={"error": str(e)})
+
+
+@app.get("/chores/all", dependencies=[Auth])
+async def chores_all():
+    try:
+        return await run_in_threadpool(build_chores_all)
+    except FileNotFoundError as e:
+        raise HTTPException(500, detail={"error": str(e)})
     except Exception as e:
         raise HTTPException(500, detail={"error": str(e)})
 
@@ -919,8 +941,12 @@ async def chores_status():
 @app.post("/chores/complete", dependencies=[Auth])
 async def chores_complete(body: ChoreCompleteBody):
     try:
-        msg = await run_in_threadpool(chores_agent.chore_complete, body.chore_name, body.note)
-        ok = not str(msg).lower().startswith("could not")
+        ok, msg = await run_in_threadpool(
+            complete_chore_from_schedule,
+            body.chore_id,
+            body.chore_name,
+            body.note,
+        )
         return {"success": ok, "message": msg}
     except Exception as e:
         raise HTTPException(500, detail={"error": str(e)})
@@ -1043,10 +1069,40 @@ async def calendar_today():
         raise HTTPException(500, detail={"error": str(e)})
 
 
-@app.get("/calendar/week", dependencies=[Auth])
-async def calendar_week():
+@app.get("/calendar/day", dependencies=[Auth])
+async def calendar_day(day: str = Query(..., alias="date", description="YYYY-MM-DD")):
     try:
-        return await run_in_threadpool(_calendar_week_json)
+        d = date.fromisoformat(day[:10])
+    except ValueError:
+        raise HTTPException(status_code=400, detail={"error": "Invalid date; use YYYY-MM-DD"})
+    try:
+        return await run_in_threadpool(_calendar_day_events, d)
+    except Exception as e:
+        raise HTTPException(500, detail={"error": str(e)})
+
+
+@app.get("/calendar/week", dependencies=[Auth])
+async def calendar_week(start: Optional[str] = Query(None, description="First day YYYY-MM-DD; default today")):
+    try:
+        if start:
+            week_start = date.fromisoformat(start[:10])
+        else:
+            week_start = date.today()
+    except ValueError:
+        raise HTTPException(status_code=400, detail={"error": "Invalid start date; use YYYY-MM-DD"})
+    try:
+        return await run_in_threadpool(_calendar_week_json_from, week_start)
+    except Exception as e:
+        raise HTTPException(500, detail={"error": str(e)})
+
+
+@app.get("/calendar/month", dependencies=[Auth])
+async def calendar_month(
+    year: int = Query(..., ge=1900, le=2100),
+    month: int = Query(..., ge=1, le=12),
+):
+    try:
+        return await run_in_threadpool(_calendar_month_json, year, month)
     except Exception as e:
         raise HTTPException(500, detail={"error": str(e)})
 
