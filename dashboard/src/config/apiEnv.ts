@@ -7,7 +7,13 @@ export function apiBase(): string {
   return base.replace(/\/$/, '')
 }
 
+export function isOfflineMode(): boolean {
+  const raw = (import.meta.env.VITE_OFFLINE_MODE as string | undefined) ?? ''
+  return raw.trim().toLowerCase() === 'true'
+}
+
 export function isApiConfigured(): boolean {
+  if (isOfflineMode()) return false
   return apiBase().length > 0
 }
 

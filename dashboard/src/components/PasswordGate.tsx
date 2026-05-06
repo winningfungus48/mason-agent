@@ -1,12 +1,14 @@
 import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { fetchAuthMe, loginWithPassword } from '../api/auth'
-import { isApiConfigured } from '../config/apiEnv'
+import { isApiConfigured, isOfflineMode } from '../config/apiEnv'
 
 type PasswordGateProps = {
   children: React.ReactNode
 }
 
 export function PasswordGate({ children }: PasswordGateProps) {
+  if (isOfflineMode()) return <>{children}</>
+
   const [unlocked, setUnlocked] = useState(false)
   const [checking, setChecking] = useState(true)
   const [password, setPassword] = useState('')

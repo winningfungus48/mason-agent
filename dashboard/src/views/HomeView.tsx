@@ -3,7 +3,7 @@ import { fetchCommandBriefCard } from '../api/briefing'
 import { fetchTodayCalendar, fetchTomorrowPreviewBlock } from '../api/calendar'
 import { fetchTodaysChores } from '../api/chores'
 import { fetchHabits } from '../api/habits'
-import { isApiConfigured } from '../config/apiEnv'
+import { isApiConfigured, isOfflineMode } from '../config/apiEnv'
 import { fetchTasksDueToday, fetchTasksDueTomorrow } from '../api/tasks'
 import { DaySchedulePanel } from '../components/calendar/DaySchedulePanel'
 import { ConnectGoogleBanner } from '../components/ConnectGoogleBanner'
@@ -15,10 +15,24 @@ import { TomorrowPreview } from '../components/command-center/TomorrowPreview'
 import { LoadErrorCard } from '../components/ui/LoadErrorCard'
 import { SectionSkeleton } from '../components/ui/SectionSkeleton'
 import {
+  mockAllDayEvents,
+  mockBriefExpanded,
+  mockTomorrowDateLabel,
+  mockTomorrowEvents,
+  mockTomorrowTasks,
   mockTimelineReminders,
   type CommandBriefExpanded,
 } from '../constants/commandCenterMock'
-import type { CalendarEvent, Chore, Habit, TaskItem } from '../constants/mockData'
+import {
+  mockCalendarEvents,
+  mockChores,
+  mockHabits,
+  mockTasksByList,
+  type CalendarEvent,
+  type Chore,
+  type Habit,
+  type TaskItem,
+} from '../constants/mockData'
 import { useCurrentTime } from '../hooks/useCurrentTime'
 import { buildTimelineEntries } from '../lib/commandCenterTimeline'
 import { todayIsoDate } from '../utils/date'
@@ -62,7 +76,8 @@ export function HomeView() {
     Pick<TaskItem, 'id' | 'title' | 'priority'>[]
   >([])
 
-  const needsApiEnv = !isApiConfigured()
+  const offlineMode = isOfflineMode()
+  const needsApiEnv = !isApiConfigured() && !offlineMode
   const [loading, setLoading] = useState(() => isApiConfigured())
 
   useEffect(() => {
@@ -86,6 +101,19 @@ export function HomeView() {
   const [taskDoneIds, setTaskDoneIds] = useState<Set<string>>(() => new Set())
 
   useEffect(() => {
+    if (offlineMode) {
+      setEvents(mockCalendarEvents)
+      setAllDayEvents(mockAllDayEvents)
+      setChores(mockChores)
+      setHabits(mockHabits)
+      setAllTasks(Object.values(mockTasksByList).flat())
+      setBrief(mockBriefExpanded)
+      setTomorrowLabel(mockTomorrowDateLabel)
+      setTomorrowEvents(mockTomorrowEvents.map(({ title, startTime, endTime, color }) => ({ title, startTime, endTime, color })))
+      setTomorrowTasks(mockTomorrowTasks)
+      setLoading(false)
+      return
+    }
     if (!isApiConfigured()) {
       setLoading(false)
       return
